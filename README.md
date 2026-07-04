@@ -1,60 +1,95 @@
 # SERL-Plus-Plus
+
 ![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 
 > This repository is built upon a fork of [HIL-SERL](https://github.com/rail-berkeley/hil-serl).
 
 ## Requirements
 
-- Python 3.10
-- CUDA 12.4+ (recommended for GPU acceleration)
+- Python 3.10.19
+- CUDA 12.4+ recommended for GPU acceleration
 - PyTorch 2.4.1+
-- MuJoCo 2.3.7+
-- See `pyproject.toml` for full dependency list
+- MuJoCo 3.4.0
+- `uv` for dependency and virtual environment management
+- See `pyproject.toml` for the full dependency list
 
 ## Installation
 
 ```bash
-# clone repo
+# Clone repo
 git clone <repository-url>
-# cd folder
-cd serl-torch
-# create venv by uv
+
+# Enter repo
+cd serl-plus-plus
+
+# Create and sync the virtual environment
 uv sync
-# source venv
+
+# Activate the environment
 source .venv/bin/activate
 ```
 
+On Linux and Windows, `uv` installs PyTorch wheels from the CUDA 12.4 PyTorch
+index configured in `pyproject.toml`.
+
 ## Quick Start
-### 1. Peg insert sim with RGB
+
+Training uses two processes:
+
+- The learner owns optimization, checkpointing, logging, and the trainer server.
+- The actor interacts with the environment and sends transitions to the learner.
+
+Start the learner first, then start the actor in another terminal. If the actor
+runs on another machine, pass the learner address with `--ip=<learner-ip>` or
+edit the corresponding run script.
+
+### 1. Peg Insert Sim with RGB
 
 ![peg_insert_sim](./doc/peg_insert_sim.gif)
 
 ```bash
-# cd peg_insert_sim
+# Enter the experiment folder
 cd demos/experiments/peg_insert_sim
+
 # Download demo data
-mkdir demo_data && cd demo_data
+mkdir -p demo_data
+cd demo_data
 wget https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_sim_20_demos.pkl
 cd ..
-# Start learner node
+
+# Terminal 1: start learner node
 bash run_learner.sh
-# Open new terminal, start actor node
+
+# Terminal 2: start actor node
 bash run_actor.sh
 ```
 
-### 2. Peg insert sim with PointCloud
+### 2. Peg Insert Sim with Point Cloud
 
-![peg_insert_sim](./doc/peg_insert_pointcloud_sim.gif)
+![peg_insert_pointcloud_sim](./doc/peg_insert_pointcloud_sim.gif)
 
 ```bash
-# cd peg_insert_sim
-cd demos/experiments/peg_insert_sim
+# Enter the experiment folder
+cd demos/experiments/peg_insert_pointcloud_sim
+
 # Download demo data
-mkdir demo_data && cd demo_data
+mkdir -p demo_data
+cd demo_data
 wget https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_pointcloud_sim_20_demos.pkl
 cd ..
-# Start learner node
+
+# Terminal 1: start learner node
 bash run_learner.sh
-# Open new terminal, start actor node
+
+# Terminal 2: start actor node
 bash run_actor.sh
+```
+
+## Repository Structure
+
+```text
+demos/      Training entry points, demo collection, and experiment configs
+infra/      Simulation environments, wrappers, controllers, and hardware APIs
+launcher/   Agents, neural networks, replay buffers, wrappers, and utilities
+doc/        Demo figures and GIFs
 ```

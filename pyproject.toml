@@ -4,7 +4,7 @@ authors = [{ name = "song.liu" }]
 version = "0.1"
 description = "SERL Plus Plus"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = "==3.10.19"
 dependencies = [
     "torch==2.4.1",
