@@ -29,9 +29,6 @@ uv sync
 source .venv/bin/activate
 ```
 
-On Linux and Windows, `uv` installs PyTorch wheels from the CUDA 12.4 PyTorch
-index configured in `pyproject.toml`.
-
 ## Quick Start
 
 Training uses two processes:
@@ -83,13 +80,4 @@ bash run_learner.sh
 
 # Terminal 2: start actor node
 bash run_actor.sh
-```
-
-## Repository Structure
-
-```text
-demos/      Training entry points, demo collection, and experiment configs
-infra/      Simulation environments, wrappers, controllers, and hardware APIs
-launcher/   Agents, neural networks, replay buffers, wrappers, and utilities
-doc/        Demo figures and GIFs
 ```
