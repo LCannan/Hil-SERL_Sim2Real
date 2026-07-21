@@ -1,0 +1,114 @@
+name: insert
+
+training:
+  batch_size: 256
+  cta_ratio: 2
+  discount: 0.97
+  max_steps: 1000000
+  replay_buffer_capacity: 200000
+  random_steps: 0
+  training_starts: 100
+  steps_per_update: 50
+  actor_update_period: 10
+  log_period: 10
+  encoder_type: resnet18-pretrained
+  checkpoint_period: 5000
+  buffer_period: 1000
+  image_keys: [wrist_1]
+  proprio_keys: [tcp_pose, tcp_force, tcp_torque]
+  enable_spacemouse: true
+
+agent:
+  _target_: algorithm.launch.make_sac_pixel_agent
+  image_keys: ${task.training.image_keys}
+  encoder_type: ${task.training.encoder_type}
+  reward_bias: 0.0
+  target_entropy: null
+  discount: ${task.training.discount}
+
+environment:
+  _target_: infra.real.envs.franka_env.FrankaEnv
+  config:
+    hz: 10
+    server_url: http://127.0.0.1:5000/
+    realsense_cameras:
+      wrist_1:
+        serial_number: "323622273011"
+    image_crop:
+      wrist_1: [168, 330, 210, 425]
+    target_pose: [0.6530507802963257, -0.0010644681751728058, 0.11115740239620209, 0.9285153524986577, -0.37101300720307384, 0.008423317957817015, -0.011732126849786369] # xyz + quat
+    reward_threshold: [0.005, 0.005, 0.003, 0.1, 0.1, 0.1]
+    action_scale: [0.01, 0.05, 0.0]
+    reset_pose: [0.6530507802963257, -0.0010644681751728058, 0.12115740239620209, 0.9285153524986577, -0.37101300720307384, 0.008423317957817015, -0.011732126849786369] # xyz + quat
+    random_reset: false
+    pose_clip: true
+
+    abs_xyz_limit_low: [0.01, 0.01, 0.05]
+    abs_xyz_limit_high: [0.01, 0.01, 0.01]
+
+    random_x_range: 0.01
+    random_x_range_neg: -0.01
+    random_y_range: 0.01
+    random_y_range_neg: -0.01
+    random_z_range: 0.0
+    random_z_range_neg: 0.0
+    random_rx_range: 0.0
+    random_rx_range_neg: 0.0
+    random_ry_range: 0.0
+    random_ry_range_neg: 0.0
+    random_rz_range: 0.087
+    random_rz_range_neg: -0.087
+
+    compliance_param:
+      translational_stiffness: 1500.0
+      translational_damping: 89.0
+      rotational_stiffness: 150.0
+      rotational_damping: 7.0
+      translational_Ki: 0.0
+      translational_clip_x: 0.1
+      translational_clip_y: 0.1
+      translational_clip_z: 0.1
+      translational_clip_neg_x: 0.1
+      translational_clip_neg_y: 0.1
+      translational_clip_neg_z: 0.1
+      rotational_clip_x: 0.5
+      rotational_clip_y: 0.5
+      rotational_clip_z: 0.5
+      rotational_clip_neg_x: 0.5
+      rotational_clip_neg_y: 0.5
+      rotational_clip_neg_z: 0.5
+      rotational_Ki: 0.0
+
+    precision_param:
+      translational_stiffness: 2000.0
+      translational_damping: 89.0
+      rotational_stiffness: 250.0
+      rotational_damping: 9.0
+      translational_Ki: 0.0
+      translational_clip_x: 0.1
+      translational_clip_y: 0.1
+      translational_clip_z: 0.1
+      translational_clip_neg_x: 0.1
+      translational_clip_neg_y: 0.1
+      translational_clip_neg_z: 0.1
+      rotational_clip_x: 0.5
+      rotational_clip_y: 0.5
+      rotational_clip_z: 0.5
+      rotational_clip_neg_x: 0.5
+      rotational_clip_neg_y: 0.5
+      rotational_clip_neg_z: 0.5
+      rotational_Ki: 0.0
+
+    display_image: true
+    max_episode_length: 100
+    joint_reset_period: 0
+
+wrappers:
+  spacemouse: ${task.training.enable_spacemouse}
+  relative_frame: true
+  include_relative_pose: true
+  quat_to_rotvec: true
+  serl_observation: true
+  chunking: true
+  obs_horizon: 1
+  act_exec_horizon: null

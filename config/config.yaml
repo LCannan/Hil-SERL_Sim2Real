@@ -1,0 +1,3 @@
+defaults:
+  - task: insert_sim
+  - _self_

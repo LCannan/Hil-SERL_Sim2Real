@@ -2,7 +2,6 @@ import copy
 from scipy.spatial.transform import Rotation as R
 import gymnasium as gym
 import numpy as np
-from gym import Env
 from infra.utils.transformations import (
     construct_transform_matrix,
     construct_homogeneous_matrix,
@@ -27,7 +26,7 @@ class RelativeFrame(gym.Wrapper):
     }, and at least 6 DoF action space with (x, y, z, rx, ry, rz, ...)
     """
 
-    def __init__(self, env: Env, include_relative_pose=True):
+    def __init__(self, env: gym.Env, include_relative_pose=True):
         super().__init__(env)
         self.transform_matrix = np.zeros((6, 6))
 
@@ -128,7 +127,7 @@ class DualRelativeFrame(gym.Wrapper):
     }, and at least 12 DoF action space
     """
 
-    def __init__(self, env: Env, include_relative_pose=True):
+    def __init__(self, env: gym.Env, include_relative_pose=True):
         super().__init__(env)
         self.left_transform_matrix = np.zeros((6, 6))
         self.right_transform_matrix = np.zeros((6, 6))

@@ -1,5 +1,7 @@
 import numpy as np
 import open3d as o3d
+import threading
+import cv2
 
 
 def depth_to_point_cloud(depth_m: np.ndarray, fx, fy, cx, cy):
@@ -12,58 +14,25 @@ def depth_to_point_cloud(depth_m: np.ndarray, fx, fy, cx, cy):
     return np.stack([x, y, z], axis=-1).reshape(-1, 3)
 
 
-def estimate_point_cloud_normals(
-    points: np.ndarray,
-    camera_pos: np.ndarray,
-    radius: float = 0.02,
-    max_nn: int = 30,
-) -> np.ndarray:
-    if points.ndim != 2 or points.shape[1] < 3:
-        raise ValueError(f"points must have shape (N, C>=3), got {points.shape}")
+class ImageDisplayer(threading.Thread):
+    def __init__(self, queue, name):
+        threading.Thread.__init__(self)
+        self.queue = queue
+        self.daemon = True  # make this a daemon thread
+        self.name = name
 
-    xyz = np.asarray(points[:, :3], dtype=np.float64)
-    camera_pos = np.asarray(camera_pos, dtype=np.float64).reshape(3)
+    def run(self):
+        while True:
+            img_array = self.queue.get()  # retrieve an image from the queue
+            if img_array is None:  # None is our signal to exit
+                break
 
-    normals = np.zeros((xyz.shape[0], 3), dtype=np.float32)
-    finite_mask = np.isfinite(xyz).all(axis=1)
-    if not finite_mask.any():
-        return normals
+            frame = np.concatenate(
+                [cv2.resize(v, (128, 128)) for k, v in img_array.items() if "full" not in k], axis=1
+            )
 
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(xyz[finite_mask])
-    pcd.estimate_normals(
-        search_param=o3d.geometry.KDTreeSearchParamHybrid(
-            radius=radius,
-            max_nn=max_nn,
-        )
-    )
-    pcd.orient_normals_towards_camera_location(camera_pos)
-    normals[finite_mask] = np.asarray(pcd.normals, dtype=np.float32)
-    return normals
-
-
-def normalize_point_cloud_workspace(
-    points: np.ndarray,
-    workspace_low: np.ndarray,
-    workspace_high: np.ndarray,
-    clip: bool = True,
-) -> np.ndarray:
-    if points.ndim != 2 or points.shape[1] < 3:
-        raise ValueError(f"points must have shape (N, C>=3), got {points.shape}")
-
-    workspace_low = np.asarray(workspace_low, dtype=np.float32).reshape(3)
-    workspace_high = np.asarray(workspace_high, dtype=np.float32).reshape(3)
-    workspace_size = workspace_high - workspace_low
-    if np.any(workspace_size <= 0):
-        raise ValueError(
-            f"workspace_high must be greater than workspace_low, got {workspace_low} and {workspace_high}"
-        )
-
-    normalized = points.astype(np.float32, copy=True)
-    normalized[:, :3] = 2.0 * (normalized[:, :3] - workspace_low) / workspace_size - 1.0
-    if clip:
-        normalized[:, :3] = np.clip(normalized[:, :3], -1.0, 1.0)
-    return normalized
+            cv2.imshow(self.name, frame)
+            cv2.waitKey(1)
 
 
 class PointCloudDisplayer:

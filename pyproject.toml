@@ -34,7 +34,10 @@ dependencies = [
     "easyhid==0.0.10",
     "open3d",
     "fpsample",
-    "pyrealsense2"
+    "pyrealsense2",
+    "hydra-core",
+    "requests",
+    "flask"
 ]
 
 [build-system]
@@ -42,7 +45,18 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["launcher*", "infra*", "demos*"]
+include = ["algorithm*", "config*", "infra*", "train*", "workspace*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml", "task/*.yaml"]
+infra = [
+    "sim/envs/assets/*.xml",
+    "sim/envs/assets/*/*.xml",
+    "sim/envs/assets/*/LICENSE",
+    "sim/envs/assets/*/README.md",
+    "sim/envs/assets/*/*/*.obj",
+    "sim/envs/assets/*/assets/*.stl",
+]
 
 # PyTorch CUDA 12.4
 [[tool.uv.index]]

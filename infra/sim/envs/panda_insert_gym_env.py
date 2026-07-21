@@ -4,34 +4,16 @@ from typing import Any, Literal, Tuple, Dict
 import gymnasium as gym
 import mujoco
 import numpy as np
-
-import cv2
+from omegaconf import DictConfig
 from scipy.spatial.transform import Rotation
+
 from infra.sim.controllers.impedance import impedance_control
 from infra.sim.envs.mujoco_gym_env import GymRenderingSpec, MujocoGymEnv
+from infra.utils.config_util import as_array
 
 _HERE = Path(__file__).parent
 _XML_PATH = _HERE / "assets" / "panda_peg_insert.xml"
 _PANDA_HOME = np.asarray((0, -0.785, 0, -2.35, 0, 1.57, np.pi / 4))
-
-class DefaultEnvConfig:
-    REALSENSE_CAMERAS: Dict = {
-        "wrist1": "230322271990",
-        "wrist2": "230322272626",
-    }
-    TARGET_POSE: np.ndarray = [0.5, 0.0, 0.1, -np.pi, 0, 0] # euler
-    REWARD_THRESHOLD: np.ndarray = [0.01, 0.01, 0.01, 0.1, 0.1, 0.1]
-    ACTION_SCALE = [0.1, 1]
-    RESET_POSE = [0.5, 0.0, 0.3, -np.pi, 0, 0] # euler
-    RANDOM_RESET = False
-    RANDOM_XY_RANGE = 0.1
-    RANDOM_RX_RANGE = 0.0
-    RANDOM_RY_RANGE = 0.0
-    RANDOM_RZ_RANGE = np.pi / 6
-    ABS_POSE_LIMIT_LOW = TARGET_POSE - np.array([RANDOM_XY_RANGE, RANDOM_XY_RANGE, 0.0, RANDOM_RX_RANGE, RANDOM_RY_RANGE, RANDOM_RZ_RANGE])
-    ABS_POSE_LIMIT_HIGH = TARGET_POSE + np.array([RANDOM_XY_RANGE, RANDOM_XY_RANGE, 0.2, RANDOM_RX_RANGE, RANDOM_RY_RANGE, RANDOM_RZ_RANGE])
-    MAX_EPISODE_LENGTH: int = 100
-    DISPLAY_IMAGE: bool = True
 
 
 class PandaPegInsertGymEnv(MujocoGymEnv):
@@ -39,15 +21,25 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
 
     def __init__(
         self,
+        config: DictConfig,
         seed: int = 0,
         control_dt: float = 0.02,
         physics_dt: float = 0.002,
         time_limit: float = 10.0,
-        render_spec: list[GymRenderingSpec] = [GymRenderingSpec(camera_name="wrist1"),
-                                               GymRenderingSpec(camera_name="wrist2")],
-        render_mode: Literal["rgb_array", "human"] = "rgb_array",
-        config: DefaultEnvConfig = None,
+        render_spec: list[GymRenderingSpec] | None = None,
+        render_mode: Literal["rgb_array", "human"] | None = None,
+        fake_env: bool = False,
     ):
+        if config is None:
+            raise ValueError("PandaPegInsertGymEnv requires an environment config")
+        if render_spec is None:
+            render_spec = [
+                GymRenderingSpec(camera_name="wrist1"),
+                GymRenderingSpec(camera_name="wrist2"),
+            ]
+        if render_mode is None:
+            render_mode = "rgb_array" if fake_env else "human"
+
         super().__init__(
             xml_path=_XML_PATH,
             seed=seed,
@@ -66,15 +58,29 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
             "render_fps": int(np.round(1.0 / self.control_dt)),
         }
 
-        self._action_scale = config.ACTION_SCALE
-        self._TARGET_POSE = config.TARGET_POSE
-        self._REWARD_THRESHOLD = config.REWARD_THRESHOLD
-        self.resetpos = np.concatenate([config.RESET_POSE[:3], 
-                                        Rotation.from_euler("xyz", config.RESET_POSE[3:]).as_quat()])
+        self.config = config
+        self.fake_env = bool(fake_env)
+        self._action_scale = as_array(config.action_scale, "action_scale", ((2,),))
+        self._target_pose = as_array(config.target_pose, "target_pose", ((7,),))
+        self._reward_threshold = as_array(config.reward_threshold, "reward_threshold", ((6,),))
+        reset_pose = as_array(config.reset_pose, "reset_pose", ((7,),))
+        abs_xyz_limit_low = as_array(config.abs_xyz_limit_low, "abs_xyz_limit_low", ((3,),))
+        abs_xyz_limit_high = as_array(config.abs_xyz_limit_high, "abs_xyz_limit_high", ((3,),))
+
+        self._random_reset = bool(config.random_reset)
+        self._random_xy_range = float(config.random_xy_range)
+        self._random_rx_range = float(config.random_rx_range)
+        self._random_ry_range = float(config.random_ry_range)
+        self._random_rz_range = float(config.random_rz_range)
+        self._max_episode_length = int(config.max_episode_length)
+        self.display_image = bool(config.display_image)
+        if self._max_episode_length <= 0:
+            raise ValueError("max_episode_length must be positive")
+
+        self.resetpos = reset_pose.copy()
 
         self.render_mode = render_mode
 
-        self.config = config
         self.cur_episode_length = 0
         self._panda_dof_ids = np.asarray([self._model.joint(f"joint{i}").id for i in range(1, 8)])
         
@@ -85,8 +91,8 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
         self._end_effector_id = self._model.body("end_effector").mocapid.item()
 
         self.xyz_bounding_box = gym.spaces.Box(
-            self.config.ABS_POSE_LIMIT_LOW[:3],
-            self.config.ABS_POSE_LIMIT_HIGH[:3],
+            abs_xyz_limit_low,
+            abs_xyz_limit_high,
             dtype=np.float64,
         )
 
@@ -101,8 +107,15 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
                     }
                 ),
                 "images": gym.spaces.Dict(
-                    {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
-                                for key in self.config.REALSENSE_CAMERAS}
+                    {
+                        spec.camera_name: gym.spaces.Box(
+                            0,
+                            255,
+                            shape=(spec.height, spec.width, 3),
+                            dtype=np.uint8,
+                        )
+                        for spec in render_spec
+                    }
                 ),
             }
         )
@@ -113,6 +126,8 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
         )
 
     def reset(self, seed=None, **kwargs) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+        if seed is not None:
+            self._random = np.random.RandomState(seed)
         self.cur_episode_length = 0
         mujoco.mj_resetData(self._model, self._data)
         self._data.qpos[self._panda_dof_ids] = _PANDA_HOME
@@ -121,16 +136,16 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
 
         reset_pose = self.resetpos.copy()
 
-        if self.config.RANDOM_RESET:
-            reset_pose[:2] += np.random.uniform(
-                -self.config.RANDOM_XY_RANGE, self.config.RANDOM_XY_RANGE, (2,)
+        if self._random_reset:
+            reset_pose[:2] += self.random_state.uniform(
+                -self._random_xy_range, self._random_xy_range, (2,)
             )
 
             quat_reset = reset_pose[3:].copy()
             euler_delta = np.array([
-                np.random.uniform(-self.config.RANDOM_RX_RANGE, self.config.RANDOM_RX_RANGE),
-                np.random.uniform(-self.config.RANDOM_RY_RANGE, self.config.RANDOM_RY_RANGE),
-                np.random.uniform(-self.config.RANDOM_RZ_RANGE, self.config.RANDOM_RZ_RANGE)
+                self.random_state.uniform(-self._random_rx_range, self._random_rx_range),
+                self.random_state.uniform(-self._random_ry_range, self._random_ry_range),
+                self.random_state.uniform(-self._random_rz_range, self._random_rz_range),
             ])
             reset_pose[3:] = (Rotation.from_euler("xyz", euler_delta) * Rotation.from_quat(quat_reset)).as_quat()
 
@@ -166,12 +181,19 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
 
         obs = self._compute_observation()
         reward = self._compute_reward()
-        done = self.cur_episode_length >= self.config.MAX_EPISODE_LENGTH or reward
+        terminated = bool(reward)
+        truncated = (
+            (
+                self.cur_episode_length >= self._max_episode_length
+                or self.time_limit_exceeded()
+            )
+            and not terminated
+        )
 
         if self.render_mode == "human":
             self._viewer.sync()
         
-        return obs, int(reward), done, False, {"succeed": reward}
+        return obs, int(reward), terminated, truncated, {"succeed": bool(reward)}
 
     def _reset_arm_to_home(self, tcp_pos=None):
         self._data.qpos[self._panda_dof_ids] = _PANDA_HOME
@@ -192,8 +214,10 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
         obs["state"]["tcp_force"] = self._data.sensor("panda/end_effector_force").data
         obs["state"]["tcp_torque"] = self._data.sensor("panda/end_effector_torque").data
 
-        obs["images"] = {}
-        obs["images"]["wrist1"], obs["images"]["wrist2"] = self.render()
+        obs["images"] = {
+            spec.camera_name: frame
+            for spec, frame in zip(self._render_specs, self.render())
+        }
 
         return obs
 
@@ -202,12 +226,16 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
         cur_xmat = self._data.site_xmat[self._hand_site_id].reshape((3, 3))
         
         cur_rot = Rotation.from_matrix(cur_xmat)
-        target_rot = Rotation.from_euler("xyz", self._TARGET_POSE[3:]).as_matrix()
-        diff_rot =  target_rot @ cur_rot.as_matrix().T
-        diff_euler = Rotation.from_matrix(diff_rot).as_euler("xyz")
-        delta = np.abs(np.hstack([cur_pos - self._TARGET_POSE[:3], diff_euler]))
+        position_error = np.abs(cur_pos - self._target_pose[:3])
+        rotation_error = np.abs(
+            (
+                cur_rot
+                * Rotation.from_quat(self._target_pose[3:]).inv()
+            ).as_rotvec()
+        )
+        delta = np.concatenate([position_error, rotation_error])
         
-        return np.all(delta < self._REWARD_THRESHOLD)
+        return bool(np.all(delta < self._reward_threshold))
     
     def _servo_Impedance_pose(self, target_pos, target_quat, num_steps=2000):
         for _ in range(num_steps):
@@ -235,50 +263,16 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
     def _clip_safety_box(self, pose: np.ndarray) -> np.ndarray:
         pose[:3] = np.clip(pose[:3], self.xyz_bounding_box.low, self.xyz_bounding_box.high)
         
-        delta_R = Rotation.from_quat(pose[3:]) * Rotation.from_euler("xyz", self._TARGET_POSE[3:]).inv()
+        target_rotation = Rotation.from_quat(self._target_pose[3:])
+        delta_R = Rotation.from_quat(pose[3:]) * target_rotation.inv()
         delta_euler = delta_R.as_euler("xyz")
         delta_euler = np.clip(
             delta_euler,
-            [-self.config.RANDOM_RX_RANGE, -self.config.RANDOM_RY_RANGE, -self.config.RANDOM_RZ_RANGE],
-            [self.config.RANDOM_RX_RANGE, self.config.RANDOM_RY_RANGE, self.config.RANDOM_RZ_RANGE]
+            [-self._random_rx_range, -self._random_ry_range, -self._random_rz_range],
+            [self._random_rx_range, self._random_ry_range, self._random_rz_range]
         )
-        pose[3:] = (Rotation.from_euler("xyz", delta_euler) * Rotation.from_euler("xyz", self._TARGET_POSE[3:])).as_quat()
+        pose[3:] = (
+            Rotation.from_euler("xyz", delta_euler) * target_rotation
+        ).as_quat()
 
         return pose
-
-
-if __name__ == "__main__":
-    env = PandaPegInsertGymEnv(render_mode="human", config=DefaultEnvConfig())
-    env.reset()
-    
-    while True:
-        frames = env.render()
-        if frames and len(frames) > 0:
-            combined = np.hstack(frames)
-            combined_bgr = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
-            cv2.imshow("Cameras", combined_bgr)
-        
-        key = cv2.waitKey(1) & 0xFF
-        
-        if key == ord('q'):
-            break
-        elif key == ord('w'):
-            env.step([0.0, 0.0, 0.1, 0.0, 0.0, 0.0])
-        elif key == ord('s'):
-            env.step([0.0, 0.0, -0.1, 0.0, 0.0, 0.0])
-        elif key == ord('a'):
-            env.step([-0.1, 0.0, 0.0, 0.0, 0.0, 0.0])
-        elif key == ord('d'):
-            env.step([0.1, 0.0, 0.0, 0.0, 0.0, 0.0])
-        elif key == ord('e'):
-            env.step([0.0, 0.1, 0.0, 0.0, 0.0, 0.0])
-        elif key == ord('r'):
-            env.step([0.0, -0.1, 0.0, 0.0, 0.0, 0.0])
-        elif key == ord('i'):
-            env.step([0.0, 0.0, 0.0, 0.0, 0.0, -0.1])
-        elif key == ord('k'):
-            env.step([0.0, 0.0, 0.0, 0.0, 0.0, 0.1])
-
-        env.step([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
-    env.close()

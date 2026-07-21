@@ -1,0 +1,29 @@
+defaults:
+  - insert_sim
+  - _self_
+
+name: insert_pointcloud_sim
+
+training:
+  encoder_type: pointnet
+  image_keys: [point_cloud]
+
+agent:
+  _target_: algorithm.launch.make_sac_pointcloud_agent
+
+environment:
+  _target_: infra.sim.envs.panda_insert_pointcloud_gym_env.PandaPegInsertDepthGymEnv
+  num_points: 512
+  min_world_z: 0.005
+  max_world_z: 1.2
+  render_spec:
+    - _target_: infra.sim.envs.mujoco_gym_env.GymRenderingSpec
+      camera_name: wrist1
+      height: 128
+      width: 128
+      mode: depth_array
+    - _target_: infra.sim.envs.mujoco_gym_env.GymRenderingSpec
+      camera_name: wrist2
+      height: 128
+      width: 128
+      mode: depth_array

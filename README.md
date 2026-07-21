@@ -37,28 +37,31 @@ Training uses two processes:
 - The actor interacts with the environment and sends transitions to the learner.
 
 Start the learner first, then start the actor in another terminal. If the actor
-runs on another machine, pass the learner address with `--ip=<learner-ip>` or
-edit the corresponding run script.
+runs on another machine, pass the learner address with `--ip=<learner-ip>`.
+Task definitions live in `config/task` and can be changed at launch with repeatable
+`--config_override` flags.
 
 ### 1. Peg Insert Sim with RGB
 
 ![peg_insert_sim](./doc/peg_insert_sim.gif)
 
 ```bash
-# Enter the experiment folder
-cd demos/experiments/peg_insert_sim
-
 # Download demo data
 mkdir -p demo_data
-cd demo_data
-wget https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_sim_20_demos.pkl
-cd ..
+wget -P demo_data https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_sim_20_demos.pkl
 
 # Terminal 1: start learner node
-bash run_learner.sh
+uv run python -m train.train_rlpd \
+  --exp_name=insert_sim \
+  --demo_path=demo_data/peg_insert_sim_20_demos.pkl \
+  --checkpoint_path=checkpoints/insert_sim \
+  --learner
 
 # Terminal 2: start actor node
-bash run_actor.sh
+uv run python -m train.train_rlpd \
+  --exp_name=insert_sim \
+  --checkpoint_path=checkpoints/insert_sim \
+  --actor
 ```
 
 ### 2. Peg Insert Sim with Point Cloud
@@ -66,18 +69,25 @@ bash run_actor.sh
 ![peg_insert_pointcloud_sim](./doc/peg_insert_pointcloud_sim.gif)
 
 ```bash
-# Enter the experiment folder
-cd demos/experiments/peg_insert_pointcloud_sim
-
 # Download demo data
 mkdir -p demo_data
-cd demo_data
-wget https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_pointcloud_sim_20_demos.pkl
-cd ..
+wget -P demo_data https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_pointcloud_sim_20_demos.pkl
 
 # Terminal 1: start learner node
-bash run_learner.sh
+uv run python -m train.train_rlpd \
+  --exp_name=insert_pointcloud_sim \
+  --demo_path=demo_data/peg_insert_pointcloud_sim_20_demos.pkl \
+  --checkpoint_path=checkpoints/insert_pointcloud_sim \
+  --learner
 
 # Terminal 2: start actor node
-bash run_actor.sh
+uv run python -m train.train_rlpd \
+  --exp_name=insert_pointcloud_sim \
+  --checkpoint_path=checkpoints/insert_pointcloud_sim \
+  --actor
 ```
+
+For the real robot, first edit camera, pose, safety-limit, and controller values
+in `config/task/insert_real.yaml`, then use `--exp_name=insert_real`. For example,
+`--config_override=training.batch_size=128` changes a task value without editing
+the YAML file.
