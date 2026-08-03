@@ -51,14 +51,14 @@ mkdir -p demo_data
 wget -P demo_data https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_sim_20_demos.pkl
 
 # Terminal 1: start learner node
-uv run python -m train.train_rlpd \
+uv run python -m train.train_serl \
   --exp_name=insert_sim \
   --demo_path=demo_data/peg_insert_sim_20_demos.pkl \
   --checkpoint_path=checkpoints/insert_sim \
   --learner
 
 # Terminal 2: start actor node
-uv run python -m train.train_rlpd \
+uv run python -m train.train_serl \
   --exp_name=insert_sim \
   --checkpoint_path=checkpoints/insert_sim \
   --actor
@@ -74,14 +74,14 @@ mkdir -p demo_data
 wget -P demo_data https://github.com/liusong-0086/serl-plus-plus/releases/download/demo_data/peg_insert_pointcloud_sim_20_demos.pkl
 
 # Terminal 1: start learner node
-uv run python -m train.train_rlpd \
+uv run python -m train.train_serl \
   --exp_name=insert_pointcloud_sim \
   --demo_path=demo_data/peg_insert_pointcloud_sim_20_demos.pkl \
   --checkpoint_path=checkpoints/insert_pointcloud_sim \
   --learner
 
 # Terminal 2: start actor node
-uv run python -m train.train_rlpd \
+uv run python -m train.train_serl \
   --exp_name=insert_pointcloud_sim \
   --checkpoint_path=checkpoints/insert_pointcloud_sim \
   --actor
@@ -186,7 +186,7 @@ Only successful episodes are saved. The resulting file is written under
 Start the learner first:
 
 ```bash
-uv run python -m train.train_rlpd \
+uv run python -m train.train_serl \
   --exp_name=insert_real \
   --demo_path=demo_data/<insert_real_demo_file>.pkl \
   --checkpoint_path=checkpoints/insert_real \
@@ -197,7 +197,7 @@ Then start the actor on the computer connected to the robot, cameras, and
 SpaceMouse:
 
 ```bash
-uv run python -m train.train_rlpd \
+uv run python -m train.train_serl \
   --exp_name=insert_real \
   --checkpoint_path=checkpoints/insert_real \
   --actor \

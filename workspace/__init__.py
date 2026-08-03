@@ -1,4 +1,4 @@
 from workspace.base_workspace import BaseWorkspace
-from workspace.rlpd_workspace import RLPDWorkspace
+from workspace.serl_workspace import SERLWorkspace
 
-__all__ = ["BaseWorkspace", "RLPDWorkspace"]
+__all__ = ["BaseWorkspace", "SERLWorkspace"]

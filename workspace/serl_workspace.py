@@ -5,36 +5,11 @@ from infra.wrappers.robot_pose import Quat2RotvecWrapper
 from .base_workspace import BaseWorkspace
 
 
-class RLPDWorkspace(BaseWorkspace):
-    _JOB_NAME = "rlpd"
+class SERLWorkspace(BaseWorkspace):
+    _JOB_NAME = "serl"
 
     def __init__(self, task_name, overrides=None):
         super().__init__(task_name, overrides)
-        positive_training_fields = (
-            "batch_size",
-            "cta_ratio",
-            "max_steps",
-            "replay_buffer_capacity",
-            "training_starts",
-            "steps_per_update",
-            "actor_update_period",
-            "log_period",
-        )
-        for field in positive_training_fields:
-            if int(self._config.training[field]) <= 0:
-                raise ValueError(f"training.{field} must be positive")
-        if int(self._config.training.batch_size) < 2:
-            raise ValueError("training.batch_size must be at least 2")
-        if int(self._config.wrappers.obs_horizon) != 1:
-            raise ValueError(
-                "Only wrappers.obs_horizon=1 is supported by the current encoders"
-            )
-        if self._config.wrappers.act_exec_horizon is not None:
-            raise ValueError(
-                "wrappers.act_exec_horizon must be null for single-action SAC"
-            )
-        if not self._config.wrappers.serl_observation:
-            raise ValueError("wrappers.serl_observation must be enabled for SAC")
 
     def get_environment(
         self,

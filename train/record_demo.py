@@ -6,7 +6,7 @@ import pickle as pkl
 import datetime
 from absl import app, flags
 
-from workspace import RLPDWorkspace
+from workspace import SERLWorkspace
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
@@ -19,7 +19,7 @@ flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to coll
 flags.DEFINE_integer("seed", 42, "Environment seed.")
 
 def main(_):
-    workspace = RLPDWorkspace(FLAGS.exp_name, FLAGS.config_override)
+    workspace = SERLWorkspace(FLAGS.exp_name, FLAGS.config_override)
     env = workspace.get_environment(fake_env=False, seed=FLAGS.seed)
     
     obs, info = env.reset(seed=FLAGS.seed)

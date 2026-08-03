@@ -34,7 +34,7 @@ from agentlace.trainer import TrainerServer, TrainerClient
 from agentlace.data.data_store import QueuedDataStore
 
 from algorithm.data.data_store import ReplayBufferDataStore
-from workspace import RLPDWorkspace
+from workspace import SERLWorkspace
 
 
 FLAGS = flags.FLAGS
@@ -332,12 +332,12 @@ def learner(
 def main(_):
     global workspace
     if not FLAGS.exp_name:
-        choices = ", ".join(RLPDWorkspace.available_tasks())
+        choices = ", ".join(SERLWorkspace.available_tasks())
         raise ValueError(f"--exp_name is required. Available tasks: {choices}")
     if FLAGS.learner == FLAGS.actor:
         raise ValueError("Select exactly one of --learner or --actor")
 
-    workspace = RLPDWorkspace(FLAGS.exp_name, FLAGS.config_override)
+    workspace = SERLWorkspace(FLAGS.exp_name, FLAGS.config_override)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print_green(f"Using device: {device}")
