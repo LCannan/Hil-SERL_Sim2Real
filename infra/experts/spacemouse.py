@@ -33,6 +33,13 @@ class SpaceMouseAdapter(ExpertBase):
         del env, seed  # a human needs neither privileged state nor a seed
         self.action_dim = int(action_dim)
         self.gripper_scale = float(kwargs.pop("gripper_scale", 1.0))
+        # Teleoperation kwargs shared with the keyboard expert.  A task config
+        # carries one `expert_kwargs` block for whichever human expert is
+        # selected, so swapping EXPERT=spacemouse onto a keyboard-shaped config
+        # must not trip the guard below.  The device reports its own
+        # displacement, so there is nothing here to scale.
+        for keyboard_only in ("pos_scale", "rot_scale", "sticky_steps", "display"):
+            kwargs.pop(keyboard_only, None)
         if kwargs:
             raise TypeError(f"Unexpected expert_kwargs for spacemouse: {sorted(kwargs)}")
 

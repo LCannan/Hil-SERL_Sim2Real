@@ -61,6 +61,9 @@ HIL_OVERRIDES=()
 [[ -n "${TRIGGER:-}" ]] && HIL_OVERRIDES+=(--config_override="hil.trigger=${TRIGGER}")
 [[ -n "${THRESHOLD:-}" ]] && \
     HIL_OVERRIDES+=(--config_override="hil.disagreement_threshold=${THRESHOLD}")
+# HUD=0 turns the teleop window off on a machine that has a display; it is
+# skipped automatically when there is none.
+[[ -n "${HUD:-}" ]] && HIL_OVERRIDES+=(--config_override="hil.hud=${HUD}")
 
 # train_serl always initializes Weights & Biases, and wandb aborts the process
 # outright when no API key is configured -- the learner dies before its first

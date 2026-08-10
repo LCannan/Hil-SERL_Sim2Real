@@ -332,8 +332,8 @@ wrapper sets `info["intervene_action"]` to the action it actually executed, and
 `train_serl.py` stores that instead of the policy's action.
 
 Running this normally needs a SpaceMouse. To make it reproducible without
-hardware, the expert is an interface with two implementations — a SpaceMouse and
-a scripted controller — selected by config:
+hardware, the expert is an interface with several implementations — a
+SpaceMouse, a keyboard, and a scripted controller — selected by config:
 
 ```bash
 ./scripts/run_hil_serl.sh insert_sim demos 20   # scripted expert records 20 demos
@@ -380,7 +380,7 @@ Taking over on every step would just be behavior cloning on scripted data. Three
 | mode | intervenes when | used for |
 | --- | --- | --- |
 | `always` | every step | bootstrapping demos with `record_demo` |
-| `manual` | `‖a_expert‖ > 1e-3`, i.e. the human is pushing the device | SpaceMouse |
+| `manual` | `‖a_expert‖ > hil.manual_deadband` (default `1e-3`), i.e. a human is pushing the device or holding a key | SpaceMouse, keyboard |
 | `disagreement` | `‖a_policy − a_expert‖ > hil.disagreement_threshold` | scripted |
 
 `disagreement` is shaped to resemble a human by two limits: `min_takeover_steps`
@@ -395,6 +395,89 @@ helps and this is plain SERL. The shipped values sit at the median of the gap
 distribution measured against a random policy — `1.95` for the 6-dim Cartesian
 task, `2.32` for the 8-dim joint-space one.
 
+#### Human teleoperation in simulation
+
+The scripted expert exists so the loop is reproducible without hardware. To be
+the expert yourself, `insert_sim` is the task to use: its action is already the
+6-DoF Cartesian delta `[dx, dy, dz, drx, dry, drz]` that both a SpaceMouse and
+the arrow-key layout below map onto one-to-one. (`insert_maniskill` is 8-dim
+joint-space, so neither device fits it without an IK layer.)
+
+```bash
+# keyboard, no hardware needed
+./scripts/run_hil_serl.sh insert_sim_human actor
+
+# SpaceMouse
+EXPERT=spacemouse ./scripts/run_hil_serl.sh insert_sim_human actor
+```
+
+`config/task/insert_sim_human.yaml` selects `trigger: manual`, which is what
+makes intervention hold-to-drive: while you are pushing the device or holding a
+key the expert's action is non-zero and the wrapper hands over; the moment you
+let go it emits zeros, the norm falls under `hil.manual_deadband`, and the
+policy has control again. Nothing else changes — the same
+`info["intervene_action"]` contract routes your correction into both buffers.
+
+Note that `min_takeover_steps`, `max_intervention_ratio`, and
+`intervention_decay_steps` are inert under `manual`; they exist to make the
+*scripted* expert behave like a person, and here the person decides.
+
+##### Keyboard layout
+
+| key | action | key | action |
+| --- | --- | --- | --- |
+| `W` / `S` | ±x | `I` / `K` | ±rx |
+| `A` / `D` | ±y | `J` / `L` | ±ry |
+| `Q` / `E` | ±z | `U` / `O` | ±rz |
+| `Shift` | fine mode (¼ scale) | `R` | request reset |
+
+Two backends, chosen automatically. With [`pynput`](https://pypi.org/project/pynput/)
+installed (`uv add pynput`) an action lasts exactly as long as the key is held.
+Without it — or on a machine where pynput cannot reach the X server — the expert
+falls back to reading the teleop window's `waitKey`, which reports key *repeats*
+rather than holds; a press is then latched for `hil.expert_kwargs.sticky_steps`
+control steps and fades out over them. That reads as jogging rather than
+holding, which suits an insertion task made of small corrections, but expect to
+tune `sticky_steps` to your own feel the first time.
+
+##### The teleop window
+
+`hil.hud: true` opens a cv2 window showing the wrist cameras alongside the
+telemetry you need while driving: who currently has control (`HUMAN` / `POLICY`),
+the action being executed, step and episode return, and the distance left to the
+goal pose in millimetres and radians. That last row is the one to steer by —
+`insert_sim` only pays out when every one of those six terms is inside
+`reward_threshold`.
+
+The window is skipped automatically when `DISPLAY`/`WAYLAND_DISPLAY` is unset,
+so the same config runs unchanged on a headless training host; set `HUD=0` to
+suppress it on a machine that does have a display. Note that the window is also
+where the cv2 keyboard backend reads its keys, so closing it costs you keyboard
+input unless pynput is installed.
+
+##### Recording demonstrations by hand
+
+`record_demo` drives the environment with zero actions and records whatever the
+expert overrides them with, which is why the scripted flow forces
+`trigger=always`. A human is not pushing on every step, so ask for `manual`
+instead:
+
+```bash
+DEMO_TRIGGER=manual ./scripts/run_hil_serl.sh insert_sim_human demos 10
+```
+
+Idle steps are then recorded as the zero actions that genuinely executed. Only
+successful episodes are kept.
+
+##### Episode budget
+
+`insert_sim` runs at 50 Hz, so the stock 100-step limit gives you two seconds of
+simulated time per episode — far too short to hand-drive an insertion.
+`insert_sim_human` therefore raises `max_episode_length` to 1000 and
+`time_limit` to 60.0. Both matter: truncation fires on whichever arrives first.
+The values are a starting point, not a measurement — adjust them to how fast you
+actually work.
+
 #### Real hardware
 
 On a machine with a SpaceMouse connected, switch experts without editing files:
@@ -406,7 +489,10 @@ EXPERT=spacemouse TRIGGER=manual ./scripts/run_hil_serl.sh insert_sim actor
 `manual` reproduces the semantics of the existing `SpacemouseIntervention`
 wrapper that `insert_real` uses. **This branch has not been tested against real
 hardware** — it was developed in a container with no USB subsystem. The scripted
-and SpaceMouse paths share all of their code beyond the expert itself.
+and SpaceMouse paths share all of their code beyond the expert itself. The
+keyboard and HUD code paths were likewise verified only headless: the
+degradation logic and the key-to-action mapping are tested, the on-screen window
+itself is not.
 
 #### Configuration
 
