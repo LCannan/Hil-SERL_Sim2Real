@@ -1,0 +1,66 @@
+name: insert_maniskill
+
+# Standalone by design -- do NOT make this inherit insert_sim.  Beyond dragging
+# in meaningless Cartesian fields, insert_sim carries a `render_spec` block that
+# Hydra would instantiate and pass to a constructor with no such parameter.
+
+training:
+  batch_size: 256
+  cta_ratio: 2
+  discount: 0.97
+  max_steps: 1000000
+  # Each slot stores an observation and a next_observation (~0.375 MiB/slot at
+  # 128x128), and the buffer is built twice -- replay plus demo.  50000 is
+  # ~18 GiB and ample for 30 demos plus online data.
+  replay_buffer_capacity: 50000
+  random_steps: 0
+  training_starts: 100
+  steps_per_update: 50
+  actor_update_period: 10
+  log_period: 10
+  encoder_type: resnet18-pretrained
+  checkpoint_period: 5000
+  buffer_period: 1000
+  # Raw SAPIEN sensor names, shared verbatim with the demo converter.
+  image_keys: [3rd_view_camera, wide_hand_camera]
+  proprio_keys: [qpos]
+  enable_spacemouse: false
+
+agent:
+  _target_: algorithm.launch.make_sac_pixel_agent
+  image_keys: ${task.training.image_keys}
+  encoder_type: ${task.training.encoder_type}
+  reward_bias: 0.0
+  target_entropy: null
+  discount: ${task.training.discount}
+
+environment:
+  _target_: infra.sim.envs.maniskill_peg_gym_env.ManiSkillPegInsertGymEnv
+  seed: 0
+  config:
+    env_id: PegInsertionSideWideClearanceObserverWideWrist-v1
+    control_mode: pd_joint_delta_pos
+    sim_backend: physx_cpu
+    sim_freq: 100
+    control_freq: 10
+    # Render at the demonstrations' native resolution and downsample, so online
+    # frames match the demo image distribution.  Rendering natively at 128 would
+    # not.
+    render_size: [384, 384]
+    image_size: [128, 128]
+    max_episode_length: 100
+    sparse_reward_on_success: 1.0
+    display_image: false
+
+wrappers:
+  # All keys must be present: OmegaConf raises on a missing key even for a
+  # branch that is skipped.  The Cartesian wrappers below hard-require a 6-dim
+  # action and a 7-dim tcp_pose, neither of which this joint-space task has.
+  spacemouse: ${task.training.enable_spacemouse}
+  relative_frame: false
+  include_relative_pose: false
+  quat_to_rotvec: false
+  serl_observation: true
+  chunking: true
+  obs_horizon: 1
+  act_exec_horizon: null

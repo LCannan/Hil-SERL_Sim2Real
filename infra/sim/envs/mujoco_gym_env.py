@@ -38,6 +38,7 @@ class MujocoGymEnv(gym.Env):
         
         self._renderers = [MujocoRenderer(self._model, self._data, camera_name=item.camera_name, width=item.width, 
                                           height=item.height) for item in self._render_specs]
+        self._extra_renderers = {}
         self._viewer = None
         if render_mode == "human":
             self._viewer = mujoco.viewer.launch_passive(self._model, self._data)
@@ -52,9 +53,35 @@ class MujocoGymEnv(gym.Env):
             rendered_frames.append(self._renderers[i].render(render_mode=render_spec.mode))
         return rendered_frames
 
+    def render_camera(
+        self,
+        camera_name: str,
+        width: int = 256,
+        height: int = 256,
+        mode: Literal["rgb_array", "depth_array"] = "rgb_array",
+    ):
+        """Render an extra camera without adding it to policy observations."""
+        key = (camera_name, width, height)
+        if key not in self._extra_renderers:
+            self._extra_renderers[key] = MujocoRenderer(
+                self._model,
+                self._data,
+                camera_name=camera_name,
+                width=width,
+                height=height,
+            )
+        renderer = self._extra_renderers[key]
+        viewer = renderer.viewer
+        if viewer is not None and hasattr(viewer, "make_context_current"):
+            viewer.make_context_current()
+        return renderer.render(render_mode=mode)
+
     def close(self) -> None:
         for renderer in self._renderers:
             renderer.close()
+        for renderer in self._extra_renderers.values():
+            renderer.close()
+        self._extra_renderers.clear()
         if self._viewer is not None:
             self._viewer.close()
 

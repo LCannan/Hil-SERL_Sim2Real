@@ -38,7 +38,10 @@ class PandaPegInsertGymEnv(MujocoGymEnv):
                 GymRenderingSpec(camera_name="wrist2"),
             ]
         if render_mode is None:
-            render_mode = "rgb_array" if fake_env else "human"
+            # Both training and evaluation consume camera observations.  They
+            # only need off-screen rendering; opening an interactive viewer
+            # makes actors fail on headless machines.
+            render_mode = "rgb_array"
 
         super().__init__(
             xml_path=_XML_PATH,

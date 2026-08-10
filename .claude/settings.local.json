@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(MUJOCO_GL=egl python -c ' *)",
+      "Bash(uv run *)",
+      "Bash(MUJOCO_GL=egl uv run python -c ' *)",
+      "Bash(cd /tmp && uv run --project /data/jianan.li02/serl-plus-plus python -c \" *)",
+      "Read(//tmp/**)",
+      "Bash(curl -sI --max-time 15 https://huggingface.co/api/datasets/RLinf/rlt-maniskill-PegInsertionSide-v1-400-succ)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(curl -s --max-time 30 \"https://huggingface.co/api/datasets/RLinf/rlt-maniskill-PegInsertionSide-v1-400-succ\")",
+      "Bash(curl -s --max-time 30 \"https://huggingface.co/api/datasets/RLinf/rlt-maniskill-PegInsertionSide-v1-400-succ?blobs=true\")",
+      "Bash(bc)",
+      "Bash(/data/jianan.li02/serl-plus-plus/.venv/bin/hf version *)",
+      "Bash(/data/jianan.li02/serl-plus-plus/.venv/bin/python -c \"import huggingface_hub, sys; print\\(huggingface_hub.__version__\\)\")",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(git stash *)",
+      "Bash(nohup .venv/bin/python /tmp/hil_gates.py insert_sim 10 6)"
+    ]
+  }
+}

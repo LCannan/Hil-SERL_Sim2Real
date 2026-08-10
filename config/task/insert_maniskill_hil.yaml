@@ -1,0 +1,32 @@
+defaults:
+  - insert_maniskill
+  - _self_
+
+name: insert_maniskill_hil
+
+# Human-in-the-loop variant of insert_maniskill.  Inherits everything from the
+# base task and only adds the intervention block.
+hil:
+  enabled: true
+
+  # A SpaceMouse is a 6-DoF Cartesian device and this task is joint-space, so
+  # `spacemouse` is not a meaningful expert here without an IK layer.
+  expert: scripted_insert_maniskill
+  trigger: disagreement
+
+  # Calibrated against the measured gap distribution for this task (8 joint-delta
+  # dimensions, so the norms run larger than the 6-dim Cartesian task):
+  # [min 0.77, p25 1.89, median 2.32, p75 2.78, max 4.04]. See the note in
+  # insert_sim_hil.yaml -- below the minimum this degenerates into behavior
+  # cloning, above the maximum into pure SERL, and neither failure reports itself.
+  disagreement_threshold: 2.32
+
+  min_takeover_steps: 5
+  max_intervention_ratio: 0.4
+  intervention_decay_steps: 20000
+
+  expert_kwargs:
+    joint_vel_limits: 0.5
+    joint_acc_limits: 0.5
+    grasp_settle_steps: 8
+    refine_iters: 3

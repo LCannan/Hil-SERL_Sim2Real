@@ -1,0 +1,46 @@
+defaults:
+  - insert_sim
+  - _self_
+
+name: insert_sim_human
+
+# Human teleoperation of insert_sim, by keyboard or SpaceMouse.  Inherits the
+# base task -- notably the whole `wrappers:` block, every key of which must be
+# present because the workspace reads them with attribute access.
+
+environment:
+  # The defaults give a human two seconds per episode: 100 steps at
+  # control_dt=0.02.  Both truncation paths have to move, since the first one
+  # to fire ends the episode.
+  time_limit: 60.0
+  config:
+    max_episode_length: 1000
+
+hil:
+  enabled: true
+
+  # keyboard needs no hardware; switch to spacemouse on a machine that has one
+  # (both are 6-DoF Cartesian, which is exactly this task's action space).
+  expert: keyboard
+
+  # `manual` is what makes hold-to-intervene work: the expert emits zeros when
+  # nothing is held, the norm falls under the deadband, and control returns to
+  # the policy with no state machine of its own.  Note that min_takeover_steps,
+  # max_intervention_ratio and intervention_decay_steps are inert under this
+  # trigger -- the human decides when to let go.
+  trigger: manual
+  manual_deadband: 0.001
+
+  # Opens a cv2 window with the camera views and telemetry.  Silently skipped
+  # when there is no display, so this config also runs on a headless host.
+  hud: true
+  hud_scale: 3
+
+  expert_kwargs:
+    # Full-scale output moves 1 cm and rotates 0.02 rad per step
+    # (insert_sim's action_scale), inside a 10 cm workspace.
+    pos_scale: 1.0
+    rot_scale: 1.0
+    # cv2 backend only: how many steps one keypress stays live, fading out.
+    # pynput, when installed, tracks real press/release and ignores this.
+    sticky_steps: 6

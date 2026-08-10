@@ -40,6 +40,12 @@ dependencies = [
     "flask"
 ]
 
+[project.optional-dependencies]
+# Only the insert_maniskill task needs these.  Do not hand-pin the transitive
+# deps -- mani-skill 3.0.1 resolves against every pin above unchanged, and the
+# 3.0.0bXX betas hard-pin gymnasium==0.29.1, so keep the >=3.0.1 floor.
+maniskill = ["mani-skill>=3.0.1", "pyarrow"]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

@@ -1,0 +1,42 @@
+defaults:
+  - insert_sim
+  - _self_
+
+name: insert_sim_hil
+
+# Human-in-the-loop variant of insert_sim.  Inherits everything from the base
+# task and only adds the intervention block, so insert_sim itself is untouched.
+hil:
+  enabled: true
+
+  # scripted_insert_sim runs anywhere; spacemouse needs a real HID device.
+  # On a machine with the hardware:  expert=spacemouse  trigger=manual
+  expert: scripted_insert_sim
+  trigger: disagreement
+
+  # Calibrated, not guessed. Against a random policy the measured
+  # ||a_policy - a_expert|| distribution is
+  # [min 0.78, p25 1.50, median 1.92, p75 2.25, max 3.71], so anything below
+  # ~0.8 intervenes on every single step -- behavior cloning wearing a HIL
+  # costume -- and anything above ~3.7 never intervenes at all. Sitting at the
+  # median declines on ~52% of steps: an untrained policy gets corrected about
+  # half the time (the budget below trims that to 0.4), while a policy that has
+  # learned to act like the expert falls under the threshold and is left alone.
+  disagreement_threshold: 1.95
+
+  # A human does not release after a single step.
+  min_takeover_steps: 5
+
+  # Cap intervention and decay it to zero, so the policy is progressively left
+  # to fail on its own instead of being carried by the expert forever.
+  max_intervention_ratio: 0.4
+  intervention_decay_steps: 20000
+
+  # Measured-best FSM parameters; see infra/experts/scripted_insert_sim.py for
+  # why each one matters and what was already ruled out.
+  expert_kwargs:
+    safe_z: 0.235
+    xy_tol: 0.0015
+    rot_tol: 0.03
+    stall_patience: 5
+    retry_jitter: 0.003
