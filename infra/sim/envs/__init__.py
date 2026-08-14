@@ -24,7 +24,9 @@ if not os.environ.get("DISPLAY") and not os.environ.get("MUJOCO_GL"):
 _LAZY_EXPORTS = {
     "PandaPegInsertGymEnv": "infra.sim.envs.panda_insert_gym_env",
     "PandaPegInsertDepthGymEnv": "infra.sim.envs.panda_insert_pointcloud_gym_env",
+    "PandaPickCubeGymEnv": "infra.sim.envs.panda_pick_cube_gym_env",
     "ManiSkillPegInsertGymEnv": "infra.sim.envs.maniskill_peg_gym_env",
+    "RobosuitePickPlaceGymEnv": "infra.sim.envs.robosuite_pick_place_gym_env",
 }
 
 __all__ = sorted(_LAZY_EXPORTS)

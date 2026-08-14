@@ -37,10 +37,26 @@ hil:
   hud_scale: 3
 
   expert_kwargs:
-    # Full-scale output moves 1 cm and rotates 0.02 rad per step
-    # (insert_sim's action_scale), inside a 10 cm workspace.
-    pos_scale: 1.0
-    rot_scale: 1.0
+    # Gains, not raw device range: the puck saturates at its own full scale, so
+    # these set how fast full deflection actually drives the robot.  insert_sim
+    # moves 1 cm/step at 50 Hz inside a 10 cm box, so pos_scale=1.0 crosses the
+    # whole workspace in 0.2 s.  0.35 gives ~17 cm/s, about 0.6 s end to end --
+    # fast enough to reposition without waiting, slow enough to stop on a hole.
+    pos_scale: 0.35
+    rot_scale: 0.25
+    # spacemouse only.  Fraction of full deflection ignored per axis: kills the
+    # ~0.2 of crosstalk a hand leans onto the other axes while pushing one, and
+    # the drift of a puck that has not fully re-centred.  Output is rescaled
+    # across the surviving span, so there is no step at the threshold.  Costs
+    # travel, though -- every point below it is dead, so keep it just above the
+    # crosstalk floor rather than as high as it will go.
+    deadzone: 0.15
+    # spacemouse only.  Exponent on the shaped magnitude.  This does NOT change
+    # full deflection -- that is pos_scale -- it decides how much of the travel
+    # the slow end occupies.  Kept mild: at 2.0 half speed needed 77% of the
+    # throw, which leaves most of the puck's range unusable and reads as "the
+    # robot barely moves until suddenly it lurches".
+    expo: 1.5
     # cv2 backend only: how many steps one keypress stays live, fading out.
     # pynput, when installed, tracks real press/release and ignores this.
     sticky_steps: 6

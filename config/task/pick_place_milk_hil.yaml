@@ -1,0 +1,67 @@
+defaults:
+  - pick_place_milk
+  - _self_
+
+name: pick_place_milk_hil
+
+# Scripted-expert HIL on pick_place_milk.  Inherits the base task -- notably the
+# whole `wrappers:` block, every key of which must be present because the
+# workspace reads them with attribute access.
+#
+# This is the config `scripts/run_hil_serl.sh pick_place_milk <stage>` resolves
+# to: the script rewrites <task> into <task>_hil unless it ends in _human.
+
+environment:
+  config:
+    # The scripted expert measures 10/10 at a mean of 123 steps (115-143) with
+    # the budgets below, so 250 is twice its worst case -- room for a policy to
+    # fumble and recover, without letting a stuck episode run long enough to
+    # dominate the buffer.
+    max_episode_length: 250
+
+hil:
+  enabled: true
+
+  # Reproducible without a SpaceMouse.  Measured 15/15 at 149-176 steps through
+  # the full wrapper stack with trigger=always -- the only meaningful way to
+  # measure it, since RelativeFrame rotates actions into the TCP frame.
+  expert: scripted_pick_place_milk
+
+  trigger: disagreement
+  # MEASURED, not guessed: the median of ||a_policy - a_expert|| over 711 steps
+  # of a random policy through this task's wrapper stack at control_freq=10
+  # (p10 1.34, p25 1.65, p50 1.98, p75 2.32, p90 2.57).  Re-measured after the
+  # 20 -> 10 Hz change and it barely moved (2.05 -> 1.98): the expert emits a
+  # normalised direction, so halving the rate changes how far a step travels,
+  # not how large the command is.  Both ends of this knob degrade silently --
+  # too low and the run is behavior cloning on scripted data, too high and it is
+  # plain SERL with the expert never stepping in.  Re-measure if the controller
+  # scale or the expert's gains change.
+  disagreement_threshold: 1.98
+
+  # Nobody lets go after a single step, and releasing mid-correction leaves the
+  # arm worse off than never having taken over.
+  min_takeover_steps: 5
+  # The budget decays to zero so the policy is progressively left to fail on its
+  # own; without the decay the expert props it up forever.
+  max_intervention_ratio: 0.4
+  intervention_decay_steps: 50000
+
+  expert_kwargs:
+    # These are budgets in *steps*, so halving `control_freq` doubles the
+    # simulated time each one buys -- and the LIFT stage in particular always
+    # exits by timing out rather than by tolerance (its target is
+    # `obj + lift_height`, and the carton rises with the gripper, so the error
+    # never closes).  Left at the 20 Hz values of 120/200 the expert therefore
+    # spent double the time it needed lifting and ran the episode out mid-carry:
+    # measured 2/10, every loss a timeout.
+    #
+    # Swept at 10 Hz over 10 episodes each: 120/200 -> 2/10, 60/100 -> 6/10,
+    # 40/70 -> 10/10 (mean 123 steps), 30/60 -> 9/10.  40/70 is the plateau.
+    # Re-measure if `control_freq` moves again.
+    phase_step_limit: 40
+    carry_step_limit: 70
+
+  # No window: the scripted expert needs no operator, and the actor should run
+  # headless.
+  hud: false

@@ -45,6 +45,11 @@ class RelativeFrame(gym.Wrapper):
         # this is to convert the spacemouse intervention action
         if "intervene_action" in info:
             info["intervene_action"] = self.transform_action_inv(info["intervene_action"])
+        # Same treatment: `total_action` is the executed action on steps the
+        # policy steered but the operator's gripper latch was held over it, and
+        # the actor stores it against a policy-frame observation.
+        if "total_action" in info:
+            info["total_action"] = self.transform_action_inv(info["total_action"])
 
         # Update transform matrix
         self.transform_matrix = construct_transform_matrix(obs["state"]["tcp_pose"])

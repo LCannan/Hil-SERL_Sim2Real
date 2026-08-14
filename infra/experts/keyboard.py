@@ -158,9 +158,16 @@ class KeyboardExpert(ExpertBase):
         rot_scale: float = 1.0,
         sticky_steps: int = 6,
         display: Any = None,
+        invert_xy: bool = False,
         **kwargs: Any,
     ):
         del env, seed  # a human needs neither privileged state nor a seed
+        # Mirror of the pops in SpaceMouseAdapter: one `expert_kwargs` block
+        # serves whichever human expert is selected, so EXPERT=keyboard on a
+        # spacemouse-tuned config must not trip the guard below.  A keyboard has
+        # no analogue deflection, hence nothing for these to shape.
+        for spacemouse_only in ("deadzone", "expo", "gripper_scale"):
+            kwargs.pop(spacemouse_only, None)
         if kwargs:
             raise TypeError(
                 f"Unexpected expert_kwargs for keyboard: {sorted(kwargs)}"
@@ -168,6 +175,9 @@ class KeyboardExpert(ExpertBase):
         self.action_dim = int(action_dim)
         self.pos_scale = float(pos_scale)
         self.rot_scale = float(rot_scale)
+        # See SpaceMouseAdapter: a scene camera facing the robot mirrors the
+        # horizontal plane, so the key for "right" moves the arm left on screen.
+        self.invert_xy = bool(invert_xy)
         self._gripper = 0.0
         self._reset_requested = False
         self._backend = self._make_backend(display, sticky_steps)
@@ -211,6 +221,10 @@ class KeyboardExpert(ExpertBase):
                 continue
             scale = self.pos_scale if kind == "pos" else self.rot_scale
             action[axis] += sign * scale * fine * float(weight)
+
+        if self.invert_xy:
+            action[0] *= -1.0
+            action[1] *= -1.0
 
         # Space toggles the gripper, and only where one exists.
         left = right = 0

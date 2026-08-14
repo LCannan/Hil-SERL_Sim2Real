@@ -534,6 +534,39 @@ device_specs = {
         ],  # FIT
         axis_scale=350.0,
     ),
+    # The Bluetooth Edition reports 0xC63A on *every* connection path, cabled
+    # USB included -- it never falls back to the 0xC62E of the non-BT unit, and
+    # device matching below is an exact vendor+product comparison with no
+    # fallback.  Upstream pyspacemouse does not carry this id either.
+    #
+    # The channel/byte layout below is the cabled model's and was confirmed
+    # against this device: all six DoF land on the right axis with no crosstalk
+    # (infra/hardware/spacemouse/calibrate_spacemouse.py).  The rotation *signs*
+    # are left as the cabled model had them even though they are not self
+    # consistent -- with x=right, y=forward, z=up, roll follows the right-hand
+    # rule but pitch and yaw are inverted.  Flipping them here would fight the
+    # second remapping in SpaceMouseExpert._read_spacemouse, which is where the
+    # robot-frame convention is actually decided.
+    "SpaceMouse Wireless BT": DeviceSpec(
+        name="SpaceMouse Wireless BT",
+        # vendor ID and product ID
+        hid_id=[0x256F, 0xC63A],
+        # LED HID usage code pair
+        led_id=[0x8, 0x4B],
+        mappings={
+            "x": AxisSpec(channel=1, byte1=1, byte2=2, scale=1),
+            "y": AxisSpec(channel=1, byte1=3, byte2=4, scale=-1),
+            "z": AxisSpec(channel=1, byte1=5, byte2=6, scale=-1),
+            "pitch": AxisSpec(channel=1, byte1=7, byte2=8, scale=-1),
+            "roll": AxisSpec(channel=1, byte1=9, byte2=10, scale=-1),
+            "yaw": AxisSpec(channel=1, byte1=11, byte2=12, scale=1),
+        },
+        button_mapping=[
+            ButtonSpec(channel=3, byte=1, bit=0),  # LEFT
+            ButtonSpec(channel=3, byte=1, bit=1),  # RIGHT
+        ],
+        axis_scale=350.0,
+    ),
     "3Dconnexion Universal Receiver": DeviceSpec(
         name="3Dconnexion Universal Receiver",
         # vendor ID and product ID

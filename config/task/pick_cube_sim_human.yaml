@@ -1,0 +1,86 @@
+defaults:
+  - pick_cube_sim
+  - _self_
+
+name: pick_cube_sim_human
+
+# SpaceMouse teleoperation of pick_cube_sim.  Inherits the base task -- notably
+# the whole `wrappers:` block, every key of which must be present because the
+# workspace reads them with attribute access.
+
+environment:
+  # The base task's 300 steps at control_dt=0.02 are six seconds of simulated
+  # time -- enough for the ~63-step open-loop controller, nowhere near enough for
+  # a hand.  A pick is four sub-tasks in series (travel, align, close, carry) and
+  # the grasp alone eats several seconds of hunting for the right height, so this
+  # is a good deal more generous than insert_sim_human's 1000: there the whole
+  # episode is one continuous motion.
+  #
+  # Both truncation paths have to move together, since the first to fire ends the
+  # episode: 2000 steps is 40 s of simulated time, so time_limit goes to 120 to
+  # stay out of the way.  Truncation is not failure -- it only ends the episode --
+  # but a truncated attempt is discarded by record_demo, which keeps successes
+  # only, so budget for a re-grasp after a fumble rather than a clean run.
+  time_limit: 120.0
+  config:
+    max_episode_length: 2000
+
+hil:
+  enabled: true
+
+  expert: spacemouse
+
+  # `manual` is what makes hold-to-intervene work: the puck emits ~zeros when the
+  # hand is off it, the norm falls under the deadband, and control returns to the
+  # policy with no state machine of its own.  min_takeover_steps,
+  # max_intervention_ratio and intervention_decay_steps are inert here -- the
+  # human decides when to let go.
+  trigger: manual
+  # The stock deadband is enough: `deadzone` below already snaps small puck
+  # readings to exactly zero, so an idle hand produces a true zero vector.  Only
+  # the six Cartesian channels are measured against it -- the gripper is a latch
+  # the operator holds asserted for the whole carry, and counting it would keep
+  # the norm permanently above any deadband, so control would never return to
+  # the policy.
+  #
+  # The right button switches this at runtime between `manual` (here) and
+  # `always`, i.e. between correcting the policy and driving the whole episode.
+  manual_deadband: 0.001
+
+  hud: true
+  hud_scale: 3
+  # Re-render the operator's view at this resolution rather than upscaling the
+  # policy's 128x128 observation: that blur is a resolution limit, and no
+  # interpolation filter recovers detail the render never had.  Also sets the
+  # window size (two tiles side by side, so 1280 wide).  Set 0 to fall back to
+  # upscaling.
+  hud_render_size: 640
+  # Pinned rather than following `training.image_keys`, so giving the policy
+  # another camera changes what the network sees without rearranging the window
+  # the operator flies by.
+  hud_cameras: [wrist1, wrist2]
+  # The policy's own 128x128 frames, drawn underneath at their true size.
+  hud_show_policy_view: true
+
+  expert_kwargs:
+    # Gains, not raw device range: the puck saturates at its own full scale, so
+    # these set how fast full deflection actually drives the robot.  Higher than
+    # insert_sim's 0.15 because this task's action_scale is already 2 cm/step and
+    # the work is travel rather than sub-millimetre alignment.
+    pos_scale: 0.4
+    rot_scale: 0.15
+    # Fraction of full deflection ignored per axis: kills the ~0.2 of crosstalk a
+    # hand leans onto the other axes while pushing one, and the drift of a puck
+    # that has not fully re-centred.  Output is rescaled across the surviving
+    # span, so there is no step at the threshold.
+    deadzone: 0.2
+    # Exponent on the shaped magnitude: >1 flattens the centre of travel for fine
+    # work.  Lower than insert_sim's 2.0 -- there is no insertion to feather here
+    # and a flat centre just makes the carry sluggish.
+    expo: 1.5
+    # The left button *toggles* the gripper: click to close, click again to
+    # open.  1.0 saturates the latch thresholds (|action[6]| > 0.5) so a click
+    # is unambiguous.  The command is then held asserted every step, not pulsed
+    # once -- the environment would latch on a pulse, but on the steps the
+    # policy is steering it drives this channel too, and would undo the grasp.
+    gripper_scale: 1.0

@@ -1,0 +1,55 @@
+<mujoco model="panda_pick_cube_sim">
+  <!-- panda_hand.xml, not panda.xml: the native two-finger hand is the one whose
+       actuator8/split tendon the impedance servo already drives, and the only one
+       carrying the hand_site force/torque sensors and wrist1/wrist2 cameras that
+       every Cartesian task in this repo observes.  panda.xml's Robotiq 2F85 has
+       none of those names and declares ctrlrange on the arm motors, which would
+       clamp the raw torques impedance_control writes. -->
+  <include file="panda_hand.xml"/>
+
+  <!-- noslip is what makes the grasp hold: without it the cube creeps out of the
+       fingers over a lift of a few centimetres. -->
+  <option timestep=".002" noslip_iterations="5" noslip_tolerance="0"/>
+
+  <statistic center="0.4 0 0.25" extent=".8"/>
+
+  <visual>
+    <headlight diffuse=".4 .4 .4" ambient=".5 .5 .5"/>
+    <!-- 512, not the 128 of the orphan panda_pick_cube.xml: train_serl renders the
+         eval video's main row at height 192, and offscreen buffers cap it. -->
+    <global azimuth="160" elevation="-20" offheight="512" offwidth="512"/>
+    <quality offsamples="8"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="32" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
+    <material name="grid" texture="grid" texrepeat="2 2" texuniform="true" reflectance="0"/>
+  </asset>
+
+  <worldbody>
+    <camera name="front" pos="1.1 -0.5 0.55" xyaxes="0.45 0.89 0 -0.31 0.16 0.94" fovy="45"/>
+    <light pos="0 0 3" dir="0 0 -1" diffuse="1 1 1" specular=".3 .3 .3"/>
+    <light pos="0 -.5 .4" mode="targetbodycom" target="cube" diffuse=".8 .8 .8" specular=".3 .3 .3"/>
+    <geom name="floor" size="3 3 0.01" type="plane" material="grid"/>
+
+    <!-- 4 cm cube, 50 g.  The high tangential friction and stiff-but-soft contact
+         are tuned together with noslip above; the stock defaults let the cube
+         squirt sideways out of the fingers as they close. -->
+    <body name="cube" pos="0.5 0 0.02">
+      <freejoint name="cube"/>
+      <geom name="cube" type="box" size=".02 .02 .02" mass="0.05" rgba=".75 .25 .25 1"
+            friction="1.5 0.05 0.001" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+    </body>
+
+    <!-- Both goal and TCP setpoint are mocap bodies: kinematic, so they neither
+         fall nor get pushed, and repositionable every reset via mocap_pos.
+         Non-colliding -- the goal is a location, not an obstacle. -->
+    <body name="goal_marker" pos="0.5 0 0.14" mocap="true">
+      <geom name="goal_marker" type="sphere" size=".022" contype="0" conaffinity="0" rgba=".2 .85 .35 .35"/>
+    </body>
+    <body name="end_effector" pos=".15 0 .5" quat="1 0 0 0" mocap="true">
+      <geom name="end_effector" type="box" size=".03 .03 .03" contype="0" conaffinity="0" rgba=".6 .3 .3 0"/>
+    </body>
+  </worldbody>
+</mujoco>

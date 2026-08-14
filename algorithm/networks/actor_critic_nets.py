@@ -108,6 +108,14 @@ class Critic(nn.Module):
 
 
 class GraspCritic(nn.Module):
+    """Q(s, .) over the discrete gripper actions -- the paper's second MDP.
+
+    Unlike :class:`Critic` this takes no action input: it emits one value per
+    discrete option (close / stay / open) and the caller takes an argmax.  That
+    is the paper's eq. (3) formulation, and Fig. 2 labels the two heads
+    ``Q(s, a_eef)`` and ``Q(s, a_gripper)`` to make the decoupling explicit.
+    """
+
     def __init__(
         self,
         network: nn.Module,
@@ -118,18 +126,23 @@ class GraspCritic(nn.Module):
         self.network = network
         self.init_final = init_final
         self.output_dim = output_dim
-        
+
+        # `network.out_dim`, not `network.net[-2].out_features`: with
+        # `use_layer_norm=True` -- which is what `make_sac_pixel_agent` passes --
+        # MLP's layer sequence ends [..., Linear, LayerNorm, Tanh], so `net[-2]`
+        # is a LayerNorm and has no `out_features` at all.  `Critic` above reads
+        # `out_dim` for the same reason.
         if init_final is not None:
-            self.output_layer = nn.Linear(network.net[-2].out_features, output_dim)
+            self.output_layer = nn.Linear(network.out_dim, output_dim)
             nn.init.uniform_(self.output_layer.weight, -init_final, init_final)
             nn.init.uniform_(self.output_layer.bias, -init_final, init_final)
         else:
-            self.output_layer = nn.Linear(network.net[-2].out_features, output_dim)
+            self.output_layer = nn.Linear(network.out_dim, output_dim)
             orthogonal_init()(self.output_layer.weight)
-            
+
     def forward(self, observations: torch.Tensor, train: bool = False) -> torch.Tensor:
         x = self.network(observations)
-        return self.output_layer(x)  # [batch_size, output_dim] 
+        return self.output_layer(x)  # [batch_size, output_dim]
 
 
 class CriticEnsemble(nn.Module):

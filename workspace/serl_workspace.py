@@ -41,6 +41,10 @@ class SERLWorkspace(BaseWorkspace):
             if display is not None:
                 expert_kwargs.setdefault("display", display)
 
+            hud_cameras = hil.get("hud_cameras")
+            if hud_cameras is not None:
+                hud_cameras = [str(name) for name in hud_cameras]
+
             # The expert is mounted innermost and receives the raw environment:
             # the scripted experts read privileged simulator state, and both
             # observe and act in the base frame before RelativeFrame rotates
@@ -61,6 +65,8 @@ class SERLWorkspace(BaseWorkspace):
                 max_intervention_ratio=float(hil.get("max_intervention_ratio", 0.4)),
                 intervention_decay_steps=int(hil.get("intervention_decay_steps", 0)),
                 manual_deadband=float(hil.get("manual_deadband", 1e-3)),
+                expert_frame=str(hil.get("expert_frame", "base")),
+                expert_frame_yaw=float(hil.get("expert_frame_yaw", 0.0)),
             )
             if display is not None:
                 from infra.wrappers.teleop_hud import TeleopHUD
@@ -73,6 +79,16 @@ class SERLWorkspace(BaseWorkspace):
                     target_pose=self._config.environment.get("config", {}).get(
                         "target_pose"
                     ),
+                    # 0 disables it and falls back to upscaling the policy's own
+                    # 128x128 frames, which is what a task whose env has no
+                    # `render_camera` gets anyway.
+                    render_size=int(hil.get("hud_render_size", 0)),
+                    # Named explicitly so the operator's view is decoupled from
+                    # `training.image_keys`: giving the policy another camera
+                    # then changes what the network sees without rearranging the
+                    # window the operator flies by.  Unset follows image_keys.
+                    cameras=hud_cameras,
+                    show_policy_view=bool(hil.get("hud_show_policy_view", False)),
                 )
         elif wrappers.spacemouse and not fake_env:
             from infra.wrappers.intervention import SpacemouseIntervention
@@ -118,7 +134,6 @@ class SERLWorkspace(BaseWorkspace):
         if not hil.get("hud"):
             return None
 
-        from infra.experts.keyboard import KEY_LEGEND
         from infra.utils.teleop_display import DISPLAY_AVAILABLE, TeleopDisplay
 
         if not DISPLAY_AVAILABLE:
@@ -127,8 +142,14 @@ class SERLWorkspace(BaseWorkspace):
                 "running without the teleop window."
             )
             return None
+        # The legend names real keys or buttons, so it has to match the device
+        # actually in the operator's hand.
+        if str(hil.get("expert")) == "spacemouse":
+            from infra.experts.spacemouse import LEGEND as legend
+        else:
+            from infra.experts.keyboard import KEY_LEGEND as legend
         return TeleopDisplay(
             enabled=True,
             scale=int(hil.get("hud_scale", 3)),
-            legend=KEY_LEGEND,
+            legend=legend,
         )

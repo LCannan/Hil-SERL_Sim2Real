@@ -1,0 +1,152 @@
+defaults:
+  - pick_place_milk
+  - _self_
+
+name: pick_place_milk_human
+
+# SpaceMouse teleoperation of pick_place_milk.  Inherits the base task --
+# notably the whole `wrappers:` block, every key of which must be present
+# because the workspace reads them with attribute access.
+
+# `actor_rate_hz` deliberately does NOT appear here: it lives in the base task
+# so this config, the _hil training config and record_demo pace identically.
+# Override it (training.actor_rate_hz) only to drive at a rate you will not
+# train at.
+
+environment:
+  config:
+    # Halved with the base task's `control_freq` (20 -> 10 Hz): a step now covers
+    # twice the distance, so a completed attempt costs about half the steps.  The
+    # old 600 was the observed ceiling for a completed attempt at 20 Hz.
+    #
+    # Watch for truncated recordings if a fumbled grasp plus a second try stops
+    # fitting -- a truncated attempt is discarded by record_demo, which keeps
+    # successes only, so the symptom is a collection session that quietly saves
+    # fewer demos than attempts rather than an error.  At 10 Hz this is 30 s of
+    # simulated time, the same wall-clock budget the operator had before.
+    #
+    # Unlike the MuJoCo tasks there is no `time_limit` to keep in step: this
+    # environment owns its clock through max_episode_length alone.
+    max_episode_length: 300
+
+hil:
+  enabled: true
+
+  expert: spacemouse
+
+  # `manual` is what makes hold-to-intervene work: the puck emits ~zeros when
+  # the hand is off it, the norm falls under the deadband, and control returns
+  # to the policy with no state machine of its own.  min_takeover_steps,
+  # max_intervention_ratio and intervention_decay_steps are inert here -- the
+  # human decides when to let go.
+  #
+  # The right button switches this at runtime between `manual` (here) and
+  # `always`, i.e. between correcting the policy and driving the whole episode.
+  # Only the six Cartesian channels are measured against the deadband: the
+  # gripper latch stays asserted through a carry and would otherwise pin the
+  # norm above it forever.
+  trigger: manual
+  manual_deadband: 0.001
+
+  # Drive in the end-effector's own frame rather than the robot base's, so the
+  # device feels attached to the gripper: push away from yourself and the tool
+  # goes where it is pointing, whatever the wrist has rotated to.  This also
+  # subsumes the screen-mirroring problem that `invert_xy` exists for -- the
+  # hand is no longer steering in world axes at all -- so leave that off here.
+  #
+  # `base` (the default, and what the scripted expert needs) would send the raw
+  # device axes straight through: those experts compute their deltas from
+  # world-frame geometry and rotating them would be wrong twice over.
+  expert_frame: tcp
+  # Yaw offset squaring the device with the tool.  The Panda's flange is yawed
+  # 90 degrees from anything an operator would call "forward" -- its tool x runs
+  # along world +y at this task's reset pose -- so without a correction here a
+  # forward push moves the arm sideways on screen and a sideways push moves it
+  # forward.  That swap, rather than a mirror, is the signature of a rotated
+  # frame; a mirror (forward becomes backward *and* left becomes right, with
+  # up unchanged) is this value being 180 degrees out instead.
+  #
+  # Set from the device in hand, which is the only way to settle it: the puck's
+  # physical axes are not derivable from the scene.  At +90 a push forward sends
+  # the gripper towards the viewer and a push right moves it left on screen,
+  # which is what matches this operator's puck.  Only the horizontal axes are
+  # rotated -- up/down stays world up/down -- so pushing up always lifts.  This
+  # offset belongs to the arm and the device together; re-measure it for either.
+  expert_frame_yaw: 90.0
+
+  hud: true
+  hud_scale: 3
+  # Re-render the operator's view at this resolution rather than upscaling the
+  # policy's 128x128 observation.  That blur is a resolution limit and no
+  # interpolation filter touches it: in the wrist camera at 128 the gripper's
+  # own fingers are a few pixels across and unreadable, which is exactly what
+  # the operator needs to see while closing on the carton.
+  #
+  # This also sets the window size -- two tiles side by side, so 1280x766 here.
+  # Measured against the 50 ms budget 20 Hz allows: 384 costs +5.2 ms/step, 640
+  # +6.6, 720 +10.3, 768 +16.1.  640 is where the curve turns; above it the
+  # window grows faster than the detail does.  Set 0 to fall back to upscaling.
+  hud_render_size: 640
+  # The operator's two views, pinned.  Deliberately NOT `${task.training.image_keys}`:
+  # giving the policy a third camera should change what the network sees without
+  # rearranging the window a trained operator flies by.  These two are what the
+  # hand needs -- a scene view to place the carton and a wrist view to close on
+  # it -- and adding more would only shrink both.
+  hud_cameras: [agentview, robot0_eye_in_hand]
+  # Draw the policy's own frames underneath, at their true 128x128.  The rows
+  # are not the same picture: the top is re-rendered at hud_render_size for the
+  # human, the bottom is what the network actually receives, so the gap between
+  # what you are steering by and what it can possibly learn from stays visible.
+  hud_show_policy_view: true
+
+  expert_kwargs:
+    # Gains on the puck's own full scale, deciding how much of the action space
+    # full deflection actually reaches.
+    #
+    # Sized against the *wall clock*, not against the recordings, and that is
+    # the whole point.  Pacing the loop to 20 Hz (see training.actor_rate_hz in
+    # the base task) cut the step rate roughly fourfold without touching the
+    # per-step displacement, so the arm covered a quarter of the distance per
+    # second it used to and teleoperation felt heavy and unresponsive.  Speed
+    # per second is (per-step displacement) x (rate), so with the rate fixed the
+    # only way back is a bigger step.
+    #
+    # These restore the unpaced feel in full.  Measured on this env at 20 Hz:
+    # the old unthrottled ~79 Hz loop delivered 0.250 m/s, and pos_scale 0.96
+    # gives 0.01246 m/step = 0.249 m/s.  (0.25 was 0.063 m/s -- the "heavy"
+    # setting; 0.5 was 0.130.)
+    #
+    # The OSC tracks this linearly and without oscillation right to the top: the
+    # achieved-to-commanded ratio is a flat 0.26 from 0.25 to full deflection,
+    # and std/mean of per-step displacement is 0.007 here.  It is the operator's
+    # own precision, not the controller, that this spends -- there is very
+    # little headroom left above it, so if a future change needs the arm faster
+    # still, raise `control_freq` (and actor_rate_hz with it) rather than this.
+    pos_scale: 0.96
+    # NOT scaled the way pos_scale was: rotation saturates where translation
+    # does not.  Measured achieved/commanded is 0.23 at 0.15, 0.22 at 0.3, 0.19
+    # at 0.6, 0.14 at full deflection, so the top of the range buys far less
+    # than it promises.  Matching the old 1.382 rad/s needs 0.069 rad/step, and
+    # 0.85 is the smallest value that gets there (0.06797 = 1.359 rad/s, 98% of
+    # it) while staying just below the flattest part of the curve -- 1.0 would
+    # add 4% more rotation for a noticeably less linear response under the hand.
+    rot_scale: 0.85
+    # Fraction of full deflection ignored per axis: kills the ~0.2 of crosstalk
+    # a hand leans onto the other axes while pushing one, and the drift of a
+    # puck that has not fully re-centred.
+    deadzone: 0.2
+    # Exponent on the shaped magnitude: >1 flattens the centre of travel for
+    # fine work, without making the carry sluggish.
+    expo: 1.5
+    # The left button *toggles* the gripper: click to close, click again to
+    # open.  1.0 saturates the latch thresholds (|action[6]| > 0.5) so a click
+    # is unambiguous.  The command is then held asserted every step, not pulsed
+    # once: this task sets `grasp_critic`, so on every step the policy steers it
+    # commands exactly -1/0/+1 on this channel -- which clears those same
+    # thresholds and would drop the carton a step after it was picked up.
+    #
+    # Worth knowing before recording: robosuite scores this task only once the
+    # carton is in the bin AND the gripper is more than 4.24 cm away from it.
+    # Release and pull the hand back, or the attempt is discarded as a failure
+    # no matter how good the placement looked.
+    gripper_scale: 1.0

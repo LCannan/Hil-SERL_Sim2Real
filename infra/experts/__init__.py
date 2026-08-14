@@ -19,6 +19,10 @@ _EXPERTS = {
         ".scripted_insert_maniskill",
         "ScriptedInsertManiSkillExpert",
     ),
+    "scripted_pick_place_milk": (
+        ".scripted_pick_place_milk",
+        "ScriptedPickPlaceMilkExpert",
+    ),
 }
 
 

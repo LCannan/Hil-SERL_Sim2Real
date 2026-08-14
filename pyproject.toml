@@ -37,7 +37,9 @@ dependencies = [
     "pyrealsense2",
     "hydra-core",
     "requests",
-    "flask"
+    "flask",
+    "pynput>=1.8.2",
+    "robosuite>=1.5.2",
 ]
 
 [project.optional-dependencies]
@@ -62,6 +64,9 @@ infra = [
     "sim/envs/assets/*/README.md",
     "sim/envs/assets/*/*/*.obj",
     "sim/envs/assets/*/assets/*.stl",
+    # The robosuite object overrides ship their own mesh and texture.
+    "sim/envs/assets/robosuite_objects/*.msh",
+    "sim/envs/assets/robosuite_objects/*.png",
 ]
 
 # PyTorch CUDA 12.4

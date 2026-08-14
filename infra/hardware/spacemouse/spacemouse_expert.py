@@ -18,13 +18,26 @@ class SpaceMouseExpert:
         self.latest_data = self.manager.dict()
         self.latest_data["action"] = [0.0] * 6  # Using lists for compatibility
         self.latest_data["buttons"] = [0, 0, 0, 0]
-        
+        # Cumulative 0->1 transitions per button.  Counted here rather than in
+        # the consumer because this loop free-runs against the HID reports while
+        # a control step is 50 ms at 20 Hz: a crisp click can begin and end
+        # between two consecutive samples of the button *level* and be missed
+        # entirely.  A click that toggles state cannot afford to be missed --
+        # unlike the old hold-to-close binding, a dropped edge leaves the
+        # operator's next click inverted rather than merely late.
+        self.latest_data["press_counts"] = [0, 0, 0, 0]
+
         # Start a process to continuously read the SpaceMouse state
         self.process = multiprocessing.Process(target=self._read_spacemouse)
         self.process.daemon = True
         self.process.start()
 
     def _read_spacemouse(self):
+        press_counts = [0, 0, 0, 0]
+        # Tracked locally and updated *only* from a genuine read, so the
+        # zero-filled buttons written by the exception handlers below cannot
+        # synthesize a release/press pair and toggle the gripper on their own.
+        previous = [0, 0, 0, 0]
         while True:
             try:
                 state = pyspacemouse.read_all()
@@ -46,13 +59,19 @@ class SpaceMouseExpert:
                     ]
                     buttons = state[0].buttons
 
+                for index, level in enumerate(buttons[: len(press_counts)]):
+                    if level and not previous[index]:
+                        press_counts[index] += 1
+                    previous[index] = int(bool(level))
+
                 try:
                     self.latest_data["action"] = action
                     self.latest_data["buttons"] = buttons
+                    self.latest_data["press_counts"] = list(press_counts)
                 except (BrokenPipeError, ConnectionError, OSError):
                     # Manager connection has been closed, exit gracefully
                     break
-                    
+
             except (BrokenPipeError, ConnectionError, OSError):
                 # Manager connection has been closed, exit gracefully
                 break
@@ -72,6 +91,15 @@ class SpaceMouseExpert:
         action = self.latest_data["action"]
         buttons = self.latest_data["buttons"]
         return np.array(action), buttons
+
+    def get_press_counts(self) -> list:
+        """Cumulative per-button press counts, for edge-triggered bindings.
+
+        Separate from `get_action` so the two legacy wrappers in
+        `infra/wrappers/intervention.py`, which read that method directly, keep
+        their existing return arity.
+        """
+        return list(self.latest_data["press_counts"])
     
     def close(self):
         if self.process.is_alive():

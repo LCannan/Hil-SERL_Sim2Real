@@ -1,0 +1,5 @@
+[default]
+entity = lcannan1984
+project = serl-plus-plus
+base_url = https://api.wandb.ai
+

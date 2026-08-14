@@ -1,0 +1,103 @@
+name: pick_cube_sim
+
+# Grasp a cube and carry it to a randomized 3D goal, in MuJoCo.
+#
+# Standalone by design -- do NOT make this inherit insert_sim.  Beyond the
+# meaningless insertion fields (target_pose, reward_threshold), insert_sim's
+# `environment.config` block would be merged rather than replaced, leaving keys
+# this constructor rejects, and its 6-dim assumptions do not hold here: this is
+# the only task in the repo with a gripper dimension.
+
+training:
+  batch_size: 256
+  cta_ratio: 2
+  discount: 0.97
+  max_steps: 1000000
+  # 192 KiB per slot (obs + next_obs, two 128x128x3 uint8 cameras), so the old
+  # 200000 wanted 36.6 GiB per buffer and 73 GiB across replay plus demo -- see
+  # insert_sim.yaml for the measurement.  30000 is 5.5 GiB per buffer.
+  replay_buffer_capacity: 30000
+  # Demos plus interventions only, never the online stream; kept well above any
+  # demo file's transition count so loading cannot wrap around and evict them.
+  demo_buffer_capacity: 15000
+  random_steps: 0
+  training_starts: 100
+  steps_per_update: 50
+  actor_update_period: 10
+  log_period: 10
+  encoder_type: resnet18-pretrained
+  checkpoint_period: 5000
+  buffer_period: 1000
+  image_keys: [wrist1, wrist2]
+  # gripper_pose and cube_to_goal earn their place: without the first the policy
+  # cannot tell an open hand from a closed one, and without the second it cannot
+  # know where the goal moved to this episode.
+  proprio_keys: [tcp_pose, tcp_vel, tcp_force, tcp_torque, gripper_pose, cube_to_goal]
+  enable_spacemouse: false
+
+agent:
+  _target_: algorithm.launch.make_sac_pixel_agent
+  image_keys: ${task.training.image_keys}
+  encoder_type: ${task.training.encoder_type}
+  reward_bias: 0.0
+  target_entropy: null
+  discount: ${task.training.discount}
+
+environment:
+  _target_: infra.sim.envs.panda_pick_cube_gym_env.PandaPickCubeGymEnv
+  seed: 0
+  control_dt: 0.02
+  physics_dt: 0.002
+  # A pick is a longer trajectory than an insertion: approach, descend, close,
+  # then carry.  A competent open-loop controller needs ~63 steps, so 10 s / 100
+  # steps would truncate before the carry.
+  time_limit: 20.0
+  render_spec:
+    - _target_: infra.sim.envs.mujoco_gym_env.GymRenderingSpec
+      camera_name: wrist1
+      height: 128
+      width: 128
+      mode: rgb_array
+    - _target_: infra.sim.envs.mujoco_gym_env.GymRenderingSpec
+      camera_name: wrist2
+      height: 128
+      width: 128
+      mode: rgb_array
+  config:
+    # 2 cm/step of translation, double insert_sim's 1 cm: this task travels
+    # rather than aligning, and the fine work is the grasp, not the approach.
+    action_scale: [0.02, 0.05]
+    reset_pose: [0.5, 0.0, 0.24, -1.0, 0.0, 0.0, 0.0] # xyz + quat (xyzw), hand down
+    # The arm resets directly above the cube, so reset_pose's xy is overridden
+    # per episode; only its z and orientation are used as written.
+    cube_xy_center: [0.5, 0.0]
+    cube_xy_range: 0.05
+    goal_xyz_center: [0.5, 0.0, 0.16]
+    goal_xyz_range: [0.05, 0.06, 0.03]
+    # 4.5 cm, a little over the cube's 4 cm width.  Measured: a controller that
+    # tracks the goal well settles at 3.1-3.5 cm because the impedance servo
+    # lags its setpoint, so a 3.5 cm threshold makes success knife-edge.
+    goal_threshold: 0.045
+    random_reset: true
+    # Yaw only.  Roll/pitch noise tips the fingers off the cube's flat faces and
+    # the servo fights it for the whole episode; this is also the runtime
+    # orientation clip, not just reset noise.
+    random_rz_range: 0.5235987755982988
+    # z low is 10.5 cm: the grasp height is ~11.8 cm at hand_site and the floor
+    # is at 0, so this leaves room to reach the cube without driving into it.
+    abs_xyz_limit_low: [0.40, -0.12, 0.105]
+    abs_xyz_limit_high: [0.62, 0.12, 0.34]
+    display_image: true
+    max_episode_length: 300
+
+wrappers:
+  spacemouse: ${task.training.enable_spacemouse}
+  # RelativeFrame and Quat2RotvecWrapper both act on action[:6] and tcp_pose
+  # only, so the 7th gripper dimension passes through them untouched.
+  relative_frame: true
+  include_relative_pose: true
+  quat_to_rotvec: true
+  serl_observation: true
+  chunking: true
+  obs_horizon: 1
+  act_exec_horizon: null

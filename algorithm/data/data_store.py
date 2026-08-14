@@ -11,9 +11,21 @@ class ReplayBufferDataStore(ReplayBuffer, DataStoreBase):
         observation_space: gym.Space,
         action_space: gym.Space,
         capacity: int,
-        device: str = "cpu"
+        device: str = "cpu",
+        include_grasp_penalty: bool = False,
     ):
-        ReplayBuffer.__init__(self, observation_space, action_space, capacity, device=device)
+        # `include_grasp_penalty` has to be forwarded, not just accepted: the
+        # buffer allocates its columns from these flags, and `_insert_recursively`
+        # iterates the *buffer's* keys -- so a transition carrying an unallocated
+        # key is silently dropped rather than raising.
+        ReplayBuffer.__init__(
+            self,
+            observation_space,
+            action_space,
+            capacity,
+            include_grasp_penalty=include_grasp_penalty,
+            device=device,
+        )
         DataStoreBase.__init__(self, capacity)
         self._lock = Lock()
 

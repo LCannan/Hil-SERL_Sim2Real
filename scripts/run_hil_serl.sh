@@ -47,10 +47,12 @@ CHECKPOINT_PATH="${CHECKPOINT_PATH:-checkpoints/${EXP_NAME}}"
 DEMO_PATH="${DEMO_PATH:-demo_data/${EXP_NAME}_demos.pkl}"
 SEED="${SEED:-42}"
 
-# The ManiSkill scene's human-render camera is named `render_camera`; the flag's
-# `front` default does not exist there and evaluation would crash.
+# The ManiSkill scene's human-render camera is named `render_camera`, and the
+# robosuite bins scene has no `front` camera at all (only frontview/agentview/
+# birdview/robot0_*); the flag's `front` default would crash evaluation in both.
 case "${BASE_TASK}" in
     insert_maniskill) EVAL_MAIN_CAMERA="${EVAL_MAIN_CAMERA:-render_camera}" ;;
+    pick_place_milk)  EVAL_MAIN_CAMERA="${EVAL_MAIN_CAMERA:-agentview}" ;;
     *)                EVAL_MAIN_CAMERA="${EVAL_MAIN_CAMERA:-front}" ;;
 esac
 

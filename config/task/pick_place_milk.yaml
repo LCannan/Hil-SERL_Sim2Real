@@ -1,0 +1,234 @@
+name: pick_place_milk
+
+# Pick a milk carton out of the source bin and place it in its quadrant of the
+# target bin, in robosuite.
+#
+# Standalone by design -- do NOT make this inherit pick_cube_sim.  Beyond the
+# meaningless MuJoCo fields (cube_xy_center, goal_threshold, reset_pose), that
+# task's `environment.config` block would be merged rather than replaced, and it
+# carries render_spec/control_dt/physics_dt, none of which this constructor
+# accepts.
+
+training:
+  batch_size: 256
+  cta_ratio: 2
+  # NOT the 0.97 the other tasks carry.  That value belongs to a 100-step task
+  # (insert_sim, insert_real): its effective horizon is 1/(1-0.97) = 33 steps,
+  # and this task's recorded demos average 351 steps (247-414, measured over the
+  # 20 human demos).  Reward is sparse and lands only on the terminating step,
+  # so at 0.97 the grasp -- 192 steps from success on average -- sees the
+  # success signal discounted to 0.97^192 = 2.9e-3, under the critic's own noise
+  # floor.  No amount of intervention fixes that: the correction is recorded
+  # correctly and then discounted away before it reaches a gradient.
+  #
+  # 0.99 buys a 100-step horizon and puts that same signal at 0.14, a 50x
+  # increase.  It does not cover the full 351 steps -- 0.995 (200 steps) would
+  # go further, at the cost of a noisier early critic since Q scales like
+  # 1/(1-gamma).  Raise it only if 0.99 still shows no grasping; the structural
+  # fix past that point is a shorter task, not a larger gamma.
+  discount: 0.995
+  max_steps: 1000000
+  # Measured: a slot stores an observation and a next_observation, and at two
+  # 128x128x3 uint8 cameras that is exactly 192 KiB.  The buffer is built twice
+  # -- replay plus demo -- and the pair is a RAM budget for the whole desktop,
+  # not just the trainer: at 30000/25000 the learner reached 10.1 GiB, which on
+  # a 30 GiB box already running a browser and an IDE (~18 GiB measured) pushed
+  # total RSS to 28.5 GiB and drove 1.07M pages to swap.  What stutters then is
+  # gnome-shell, whose pages get evicted -- the trainer itself keeps running, so
+  # it reads as "the machine froze" rather than as a training fault.
+  # 12000 is 2.2 GiB and still covers 20 min of online data at actor_rate_hz 10.
+  replay_buffer_capacity: 12000
+  # Demos plus interventions.  Must stay above the demo file's transition count
+  # (this task's 20 human demos are 3468) or `insert` wraps and silently
+  # overwrites the demonstrations just loaded -- but the actor's *intervention*
+  # stream lands here too, and that is the binding constraint: a milk_v4 run
+  # measured 34% intervention (6886 transitions in 20000 steps), so this fills
+  # at ~2000/hour on top of the demos.  18000 leaves ~1.2 h of interventions
+  # before wrap, and is why the shrink above came out of replay rather than here.
+  demo_buffer_capacity: 18000
+  random_steps: 0
+  training_starts: 100
+  steps_per_update: 50
+  actor_update_period: 10
+  log_period: 10
+  encoder_type: resnet18-pretrained
+  # Both periods are a write-bandwidth budget, not just a resume granularity.
+  # At the old 5000/1000 this task wrote ~11 GB/hour (6.8 replay + 3.6 demo +
+  # 0.9 checkpoints), which flushed the page cache hard enough to push the
+  # desktop's own pages into a 2 GiB swap -- the machine went laggy partway
+  # through a run while the trainer itself was fine.
+  checkpoint_period: 10000
+  buffer_period: 5000
+  # Keep only the newest few dumps.  Left unbounded these are never pruned and
+  # the learner re-reads *all* of them at startup, so an old run's directory
+  # slows every subsequent launch (6.2 GB / ~25 s was reached here).
+  buffer_keep_last: 6
+  # Raw robosuite camera names, so the env and any future demo converter cannot
+  # drift apart via a rename.  Note agentview is a fixed scene camera, not a
+  # wrist camera -- only robot0_eye_in_hand is on the hand.
+  image_keys: [agentview, robot0_eye_in_hand]
+  # Robot proprioception only -- everything here is readable from a real arm's
+  # own sensors, matching insert_real's [tcp_pose, tcp_force, tcp_torque].
+  # gripper_pose earns its place because this task has a gripper: without it the
+  # policy cannot tell an open hand from a closed one.  Object pose is
+  # deliberately absent: the env exposes `object_pose` and `object_to_goal` for
+  # the scripted expert to read, but feeding them to the policy would train
+  # against privileged state that no real setup can provide, so the object has
+  # to be located from the cameras.
+  proprio_keys: [tcp_pose, tcp_vel, tcp_force, tcp_torque, gripper_pose]
+  enable_spacemouse: false
+  # Wall-clock pacing for every loop that steps this env: the training actor,
+  # record_demo, and test_intervention all resolve it through
+  # infra/utils/rate_limit.py.  It lives in the base task rather than in the
+  # _human variant s/home/ljn/Code/Hil-SERL_Sim2Real/demo_data/pick_place_milk_human_demos.pklo those three cannot drift apart -- the same hand motion
+  # sampled at two rates is two different action distributions over identical
+  # physics, and the learner samples 50/50 from the demo and replay buffers.
+  #
+  # 10 Hz matches `control_freq` below, so one wall-clock second is one second
+  # of simulated time, which is also what real hardware imposes for free.  Keep
+  # the two equal: they are separate knobs (this one paces the loop against the
+  # wall clock, that one sets how much simulated time a step buys) and only
+  # their ratio decides whether the operator sees real time or slow motion.
+  #
+  # Unthrottled this loop runs ~127 Hz (79 with the HUD on, and varying with
+  # machine load), against a learner doing ~8.6 updates/s: corrections get
+  # diluted ~11:1 and weights reach the actor only every ~5.8 s, by which point
+  # it has moved on ~565 steps.  That is why an intervention appears to do
+  # nothing the moment you let go.
+  actor_rate_hz: 10
+
+agent:
+  _target_: algorithm.launch.make_sac_pixel_agent
+  image_keys: ${task.training.image_keys}
+  encoder_type: ${task.training.encoder_type}
+  reward_bias: 0.0
+  target_entropy: -6
+  discount: ${task.training.discount}
+  # Train the gripper channel with a separate discrete double-DQN head rather
+  # than as a seventh dimension of the Gaussian policy -- the paper's second MDP
+  # (Sec. 3.3, eq. 3).  The channel is genuinely categorical: the env latches it
+  # at +-0.5, so a tanh-squashed Gaussian spends its density on a dead zone where
+  # Q is flat in the action, and at evaluation `mode()` almost never crosses the
+  # threshold at all, i.e. the gripper simply never opens.
+  #
+  # The continuous policy and critic drop to 6 dims when this is on, which also
+  # moves `target_entropy` from -3.5 to -3.0.  Checkpoints are therefore NOT
+  # interchangeable with a run that had it off.
+  #
+  # Only the two `pick_place_milk`/`pick_cube_sim` families have a gripper at
+  # all; the key is absent from every other task config and defaults to false.
+  grasp_critic: true
+
+environment:
+  _target_: infra.sim.envs.robosuite_pick_place_gym_env.RobosuitePickPlaceGymEnv
+  seed: 0
+  config:
+    env_name: PickPlaceMilk
+    robot: Panda
+    # robosuite 1.5's composite controller: OSC_POSE on the arm plus a GRIP
+    # gripper, which is already the 7-dim [dxyz, drotvec, gripper] this repo
+    # wants.  Scale is 5 cm and 0.5 rad per step at full deflection.
+    controller: BASIC
+    # Halved from 20 Hz, and the reason is credit assignment rather than speed.
+    # A step buys twice as much simulated time, so the OSC gets twice as long to
+    # chase the same 5 cm target: measured, a full +x push moves 12.20 mm/step at
+    # 20 Hz and 23.97 mm/step at 10 Hz.  The same trajectory therefore costs
+    # about half the steps -- the 351-step demo average drops to ~175 -- which
+    # halves the exponent this task's sparse terminal reward has to survive.  It
+    # compounds with `training.discount`: at 0.99 the grasp moment sees
+    # 0.99^96 = 0.38 of the success signal, against 0.97^192 = 0.003 before.
+    #
+    # Three things move with it, all of them measured, none optional:
+    #   - `training.actor_rate_hz` above, or wall-clock and simulated time drift
+    #     apart and the operator drives in slow motion.
+    #   - `max_episode_length` here and in both variants, halved.
+    #   - Every recorded demo.  The same hand motion sampled at two rates is two
+    #     different action distributions over identical physics, and the learner
+    #     samples 50/50 from the demo and replay buffers.
+    #
+    # The cost is coarser control: 24 mm is the smallest step the policy or the
+    # operator can take, and the OSC's achieved/commanded ratio rises from 0.244
+    # to 0.479, i.e. it runs closer to saturation with less headroom before
+    # overshoot.  If sub-centimetre alignment turns out to matter more than the
+    # shorter horizon, this is the knob to put back.
+    control_freq: 10
+    image_size: [128, 128]
+    # robosuite's stock cameras, kept as-is.  Trying to fix the teleop mirroring
+    # by moving the scene camera behind the robot cost more than it bought: every
+    # placement back there either put the arm across the frame or pushed the bins
+    # far enough away to be unreadable at 128x128.  The stock viewpoint looks
+    # straight down on both bins with nothing in the way, which is worth more to
+    # an operator than matching axes.  The mirroring is handled where it belongs
+    # instead -- see `invert_xy` in the _human config's expert_kwargs.
+    agentview_pos: null
+    agentview_lookat: null
+    wrist_camera_roll: 0.0
+    # Where the carton starts, relative to bin1's centre, in metres, and its yaw
+    # in radians.  Stock robosuite scatters it over the whole bin -- measured,
+    # 20 cm x 30 cm of travel and a full 360 degrees of yaw -- which is a wide
+    # distribution to learn a single grasp over and is why this task converges
+    # slowly.  Pinning both collapses that to one pose.
+    #
+    # Set to `null` to restore the stock scatter, or raise the two jitters for a
+    # curriculum: they are half-widths, so 0.02 / 0.1 gives +-2 cm and +-5.7
+    # degrees around the pose below.  The position is bin-relative, so it stays
+    # correct if the bin ever moves.
+    #
+    # Pinning turns off robosuite's own wall-clearance inset (it cannot shrink a
+    # zero-width range), so keep |x| <= 0.106 and |y| <= 0.156 including jitter
+    # -- measured from the bin's half-extent less the carton's 0.0385 m radius.
+    object_init_pos: [0.0, 0.0]
+    object_init_rot: 0.0
+    object_init_jitter: 0.0
+    object_init_rot_jitter: 0.0
+    # A wider, shorter carton than robosuite's stock 4 cm x 15.8 cm one, which is
+    # a fiddly target for a human on a SpaceMouse.  See the XML's header.
+    object_xml: milk_wide.xml
+    # The scripted expert takes 157-173 steps at 20 Hz, so ~80-90 at 10 Hz.
+    # Halved with `control_freq` -- it still leaves a policy room to recover from
+    # a fumble without dragging failed episodes out.
+    max_episode_length: 200
+    sparse_reward_on_success: 1.0
+    # Per-axis ceiling on [translation, rotation], or null for none.  It exists
+    # to hold the policy inside the envelope a human actually drives in: without
+    # a cap an untrained SAC policy samples |a| ~= 0.66, and the critic sees a
+    # swathe of actions no demonstration covers.
+    #
+    # Deliberately null now, and worth understanding before setting it again.
+    # The cap applies to the *human's* action too, so it can never sit below the
+    # _human config's pos_scale/rot_scale or it silently clips the operator --
+    # pushing the puck harder then does nothing.  Restoring the unpaced teleop
+    # feel at 20 Hz took those gains to 0.96 / 0.85, and the action space is
+    # already +-1, so any admissible cap is now within a few percent of no cap
+    # at all.  A no-op clip written as a number invites the reader to believe
+    # the policy is still being held back; null says what is actually true.
+    #
+    # If the policy does need holding back again, the lever is `control_freq`
+    # (with training.actor_rate_hz to match), which buys speed through rate
+    # instead of per-step displacement -- not a limit below what the puck emits.
+    action_limit: null
+    # Charged once per open<->close transition, and consumed ONLY by the grasp
+    # critic's Bellman target -- never folded into `reward`, so the arm's SAC
+    # critic is not billed for the gripper's decisions.  The paper (Sec. 4.1)
+    # asks for "a small negative penalty for gripper actions to discourage the
+    # policy from operating its grippers unnecessarily" without giving a value;
+    # -0.05 is upstream HIL-SERL's.  A clean demo costs -0.10 in total (one
+    # close, one open) against a +1.0 success, so it discourages fidgeting
+    # without making a necessary grasp unprofitable.
+    grasp_penalty: -0.05
+    display_image: false
+
+wrappers:
+  # All keys must be present: OmegaConf raises on a missing key even for a
+  # branch that is skipped.
+  spacemouse: ${task.training.enable_spacemouse}
+  # The action is Cartesian and 7-dim, exactly like pick_cube_sim: RelativeFrame
+  # and Quat2RotvecWrapper both act on action[:6] and tcp_pose only, so the
+  # gripper dimension passes through them untouched.
+  relative_frame: true
+  include_relative_pose: true
+  quat_to_rotvec: true
+  serl_observation: true
+  chunking: true
+  obs_horizon: 1
+  act_exec_horizon: null

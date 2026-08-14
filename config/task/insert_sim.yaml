@@ -5,7 +5,19 @@ training:
   cta_ratio: 2
   discount: 0.97
   max_steps: 1000000
-  replay_buffer_capacity: 200000
+  # Measured, not estimated: a slot holds an observation *and* a
+  # next_observation, and at two 128x128x3 uint8 cameras that is 192 KiB --
+  # 200000 here (a leftover from when this task was state-only, where the same
+  # number cost tens of MB) asks for 36.6 GiB per buffer and 73 GiB across the
+  # two, so the learner used to fill RAM and wedge the machine ~17 min in.
+  # 30000 is 5.5 GiB per buffer, and the actor only ever reaches it after
+  # 30000 steps of online data.
+  replay_buffer_capacity: 30000
+  # The demo buffer holds demonstrations plus interventions, never the online
+  # stream, so it does not need the replay buffer's capacity -- but it must stay
+  # above the demo file's transition count or `insert` silently overwrites the
+  # demos it just loaded.  insert_sim_human's 10 demos are 5205 transitions.
+  demo_buffer_capacity: 15000
   random_steps: 0
   training_starts: 100
   steps_per_update: 50

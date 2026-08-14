@@ -16,7 +16,14 @@ def make_sac_pixel_agent(
     reward_bias: float = 0.0,
     target_entropy: float = None,
     discount: float = 0.97,
+    grasp_critic: bool = False,
 ) -> SACAgent:
+    """Build the pixel SAC agent.
+
+    ``grasp_critic`` splits the last action dimension off into a discrete
+    double-DQN head (the paper's second MDP).  Off by default, so the tasks
+    without a gripper are untouched.
+    """
     torch.manual_seed(seed)
 
     agent = SACAgent.create_pixels(
@@ -25,6 +32,7 @@ def make_sac_pixel_agent(
         encoder_type=encoder_type,
         use_proprio=True,
         image_keys=image_keys,
+        grasp_critic=grasp_critic,
         policy_kwargs={
             "tanh_squash_distribution": True,
             "std_parameterization": "exp",

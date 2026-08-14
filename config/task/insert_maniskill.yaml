@@ -9,10 +9,14 @@ training:
   cta_ratio: 2
   discount: 0.97
   max_steps: 1000000
-  # Each slot stores an observation and a next_observation (~0.375 MiB/slot at
-  # 128x128), and the buffer is built twice -- replay plus demo.  50000 is
-  # ~18 GiB and ample for 30 demos plus online data.
-  replay_buffer_capacity: 50000
+  # Each slot stores an observation and a next_observation -- 192 KiB at two
+  # 128x128x3 uint8 cameras -- and the buffer is built twice, replay plus demo.
+  # 50000 would be ~18 GiB across the two on a 30 GiB machine; 30000 is 5.5 GiB
+  # per buffer.
+  replay_buffer_capacity: 30000
+  # Demos plus interventions only, so it needs far less than the online stream;
+  # kept above the converted HF demo set's transition count.
+  demo_buffer_capacity: 15000
   random_steps: 0
   training_starts: 100
   steps_per_update: 50

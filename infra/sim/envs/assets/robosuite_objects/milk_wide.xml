@@ -1,0 +1,46 @@
+<!--
+  A wider, shorter milk carton for pick_place_milk.
+
+  The stock robosuite carton is 4 cm across and 15.8 cm tall (measured from the
+  compiled geom: half-extents 0.0199 x 0.0199 x 0.079). Against a Panda gripper
+  whose fingers open to 8 cm total, that is a narrow target perched high enough
+  to topple when a hand nudges it off-centre: fine for a scripted controller
+  that approaches dead-on, needlessly fiddly for a human on a SpaceMouse.
+
+  The mesh is scaled non-uniformly rather than swapped for a new asset,
+  composing with the stock file's own 0.9. The carton comes out 6.4 cm across
+  and 10.5 cm tall: wide enough to be an easy target for a hand, short enough
+  that a glancing contact slides it rather than tipping it over.
+
+  6.4 cm is about the sweet spot, and wider is not simply better. The Panda's
+  fingers span 8 cm fully open, so a wider carton leaves less clearance and the
+  gripper has to arrive more precisely centred. Measured, holding everything
+  else fixed and re-tuning grasp_height for each: 5.6 cm scores 10/10, 6.4 cm
+  scores 7/8, 6.8 cm drops to 4/6, and 7.9 cm fails outright at 1/6. Changing
+  this width means re-tuning the expert's grasp_height and re-measuring, not
+  extrapolating: the compiled geom is a bounding box around the mesh, so the
+  rendered width is not a linear function of the scale written here.
+
+  Everything else (density, friction, solimp/solref) is copied from robosuite's
+  milk.xml unchanged. The three sites are rescaled to match the new mesh:
+  top_site and bottom_site drive the placement sampler's z, and
+  horizontal_radius_site its collision spacing, so leaving them at the stock
+  values would spawn the carton clipping into the bin.
+-->
+<mujoco model="milk_wide">
+  <asset>
+    <mesh file="milk.msh" name="milk_mesh" scale="1.45 1.45 0.60"/>
+    <texture file="ceramic.png" name="tex-ceramic" type="2d"/>
+    <material name="ceramic" reflectance="0.5" texrepeat="1 1" texture="tex-ceramic" texuniform="true"/>
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <geom pos="0 0 0" mesh="milk_mesh" type="mesh" solimp="0.998 0.998 0.001" solref="0.001 1" density="100" friction="0.95 0.3 0.1" material="ceramic" group="0" condim="4"/>
+      </body>
+      <site rgba="0 0 0 0" size="0.005" pos="0 0 -0.0567" name="bottom_site"/>
+      <site rgba="0 0 0 0" size="0.005" pos="0 0 0.0500" name="top_site"/>
+      <site rgba="0 0 0 0" size="0.005" pos="0.0385 0.0385 0" name="horizontal_radius_site"/>
+    </body>
+  </worldbody>
+</mujoco>

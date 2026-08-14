@@ -202,7 +202,141 @@ Two things worth knowing about the dataset:
 `--eval_video_main_camera` defaults to `front`, which does not exist in this
 scene; pass `render_camera` as shown above.
 
-### 4. FR3 Real Robot
+### 4. Pick Cube Sim
+
+Grasp a 4 cm cube and carry it to a randomized 3D goal, in MuJoCo. Both the cube's
+xy and the goal's xyz are resampled every reset; a translucent green sphere shows
+where the goal is.
+
+This is the only task in the repo with a **gripper**, so its action is 7-dim —
+`[dx, dy, dz, drx, dry, drz, gripper]` — where `gripper < -0.5` closes,
+`> 0.5` opens, and anything between holds the current state. The reward is sparse
+and requires the cube to be **held at the goal**: both fingers in contact *and*
+the cube within `goal_threshold` (4.5 cm) of the marker. Throwing the cube through
+the sphere does not count.
+
+```bash
+# Terminal 1: learner (needs demonstrations; see section 5 to record them by hand)
+uv run python -m train.train_serl \
+  --exp_name=pick_cube_sim \
+  --demo_path=demo_data/pick_cube_sim_human_demos.pkl \
+  --checkpoint_path=checkpoints/pick_cube_sim \
+  --learner
+
+# Terminal 2: actor
+uv run python -m train.train_serl \
+  --exp_name=pick_cube_sim \
+  --checkpoint_path=checkpoints/pick_cube_sim \
+  --actor
+```
+
+`pick_cube_sim_human` is the teleoperation variant, driven by SpaceMouse — see
+[Picking a cube with a SpaceMouse](#picking-a-cube-with-a-spacemouse).
+
+A few numbers, measured rather than guessed, in case you retune it: the TCP sits
+~9.9 cm above the cube's centre once the grasp closes, the grasp height is ~11.8 cm
+at `hand_site`, and a competent open-loop controller completes an episode in ~63
+steps against this task's 300-step budget. `goal_threshold` is 4.5 cm because a
+controller that tracks the goal well still settles 3.1–3.5 cm away — the impedance
+servo lags its setpoint — so a tighter threshold makes success knife-edge.
+
+That 300-step budget is sized for a policy, not a person; `pick_cube_sim_human`
+raises it to 2000 steps / 120 s for hand-driving.
+
+Unlike `insert_sim`, this task's `proprio_keys` include `gripper_pose` and
+`cube_to_goal`: without the first the policy cannot distinguish an open hand from
+a closed one, and without the second it cannot know where the goal moved to.
+
+### 5. Pick Place Milk (robosuite)
+
+Pick a milk carton out of the source bin and place it in its quadrant of the
+target bin, in [robosuite](https://robosuite.ai)'s `PickPlaceMilk`. robosuite is
+a hard dependency and needs no extra install.
+
+Like `pick_cube_sim` this task has a **gripper**, so its action is 7-dim —
+`[dx, dy, dz, drx, dry, drz, gripper]` — and follows this repo's convention:
+`gripper < -0.5` closes, `> 0.5` opens, anything between holds. robosuite's own
+convention is the opposite sign *and* rate-based rather than latched; the
+environment translates, holding the latched command asserted every step.
+
+The reward is sparse and comes from robosuite's `_check_success()` unchanged.
+**Success requires releasing the carton and pulling back:** the criterion is the
+carton inside its bin quadrant *and* the gripper more than **4.24 cm** away
+(`r_reach = 1 - tanh(10*d) < 0.6`). A run that places the carton perfectly and
+hovers over it scores exactly zero — worth knowing before recording demos by
+hand.
+
+```bash
+# Record 20 demonstrations with the scripted expert (no hardware needed)
+./scripts/run_hil_serl.sh pick_place_milk demos 20
+
+# Terminal 1: learner
+./scripts/run_hil_serl.sh pick_place_milk learner
+# Terminal 2: actor, with the expert intervening on disagreement
+./scripts/run_hil_serl.sh pick_place_milk actor
+
+# Evaluate the policy alone, writing MP4s
+./scripts/run_hil_serl.sh pick_place_milk eval 10
+```
+
+`pick_place_milk_human` is the teleoperation variant, driven by SpaceMouse — see
+[Picking a cube with a SpaceMouse](#picking-a-cube-with-a-spacemouse) for the
+device setup, which is identical.
+
+A few numbers, measured rather than guessed, in case you retune it. The scripted
+expert succeeds **13/15** at 149–260 control steps, against this task's 400-step
+budget — measured through the full wrapper stack with `hil.trigger=always`, which
+is the only meaningful way to measure it: `RelativeFrame` rotates actions into the
+TCP frame, so an expert benchmarked against the bare environment can score
+perfectly there and still fly the arm out of the workspace once wrapped. Its
+`disagreement_threshold` of 2.05 is the median of ‖a_policy − a_expert‖ over 1230
+steps of a random policy (p25 1.67, p75 2.38).
+
+The milk carton is **not** robosuite's stock one. That is 4 cm across and 15.8 cm
+tall, which is a fiddly target for a hand on a SpaceMouse, so
+`environment.config.object_xml` points at
+[milk_wide.xml](infra/sim/envs/assets/robosuite_objects/milk_wide.xml) — 6.4 cm
+across and 10.5 cm tall. Set `object_xml` to `null` for the stock carton.
+
+Wider is not simply better, and the trade-off is steep: the gripper spans 8 cm,
+so a wider carton leaves less clearance and demands a more precisely centred
+approach. Measured, re-tuning the expert's `grasp_height` for each width, 5.6 cm
+scores 10/10, 6.4 cm scores 7/8, 6.8 cm drops to 4/6 and 7.9 cm fails outright at
+1/6. `grasp_height` is measured from the object's body origin and is specific to
+the geometry, so re-tune and re-measure it if you change the carton.
+
+Two robosuite conventions differ from the rest of this repo and both fail
+silently rather than crashing: images come back **vertically flipped**
+(`macros.IMAGE_CONVENTION` is `"opengl"`), and `done` is raised by the horizon
+alone, so success never terminates an episode on its own. The environment flips
+the frames and polls `_check_success()` itself.
+
+Both cameras are left at their robosuite defaults, which means the scene camera
+faces the robot and so **mirrors the horizontal plane on screen**: push a teleop
+device right and the arm moves left in the picture. Moving the camera behind the
+robot fixes the axes but costs the view — every placement back there either puts
+the arm across the frame or pushes the bins too far away to read at 128×128. The
+mirroring is corrected in the teleop experts instead, via
+`hil.expert_kwargs.invert_xy` in the `_human` config, which negates the operator's
+two horizontal translation axes. That affects only the human's own actions, so
+the scripted expert's demonstrations and the policy's action space are untouched.
+The env still exposes `agentview_pos` / `agentview_lookat` / `wrist_camera_roll`
+if you want to move the cameras anyway.
+
+The policy's `proprio_keys` are **robot proprioception only** — `tcp_pose`,
+`tcp_vel`, `tcp_force`, `tcp_torque`, `gripper_pose` — every one of which
+`infra/real/envs/franka_env.py` also publishes, so the observation transfers to
+hardware unchanged. The environment additionally computes `object_pose` and
+`object_to_goal` and leaves them out of `proprio_keys` on purpose: they are
+privileged simulator state for the scripted expert to read, and a policy trained
+on them would depend on an object pose no real setup can supply. The carton has
+to be located from the two camera feeds.
+
+`--eval_video_main_camera` must be `agentview` here — the bins scene has no
+`front` camera, so the flag's default would crash evaluation.
+`run_hil_serl.sh` passes it automatically.
+
+### 5. FR3 Real Robot
 
 The real-robot stack uses
 [serl_controller_ros2](https://github.com/liusong-0086/serl_controller_ros2)
@@ -398,9 +532,10 @@ task, `2.32` for the 8-dim joint-space one.
 #### Human teleoperation in simulation
 
 The scripted expert exists so the loop is reproducible without hardware. To be
-the expert yourself, `insert_sim` is the task to use: its action is already the
-6-DoF Cartesian delta `[dx, dy, dz, drx, dry, drz]` that both a SpaceMouse and
-the arrow-key layout below map onto one-to-one. (`insert_maniskill` is 8-dim
+the expert yourself there are two tasks. `insert_sim` is the 6-DoF Cartesian
+delta `[dx, dy, dz, drx, dry, drz]` that both a SpaceMouse and the arrow-key
+layout below map onto one-to-one. `pick_cube_sim` adds a seventh gripper
+dimension and is SpaceMouse-only (see below). (`insert_maniskill` is 8-dim
 joint-space, so neither device fits it without an IK layer.)
 
 ```bash
@@ -455,6 +590,49 @@ suppress it on a machine that does have a display. Note that the window is also
 where the cv2 keyboard backend reads its keys, so closing it costs you keyboard
 input unless pynput is installed.
 
+##### Picking a cube with a SpaceMouse
+
+`pick_cube_sim` is a grasp-and-carry task: the cube spawns at a random xy on the
+table, a translucent green sphere marks a randomized 3D goal, and the reward pays
+out only when the cube is **inside the goal and still held**. Requiring the grasp
+is deliberate — otherwise flinging the cube through the sphere would score.
+
+```bash
+# SpaceMouse (the only supported device here — see below)
+./scripts/run_hil_serl.sh pick_cube_sim_human actor
+
+# record demonstrations by hand
+DEMO_TRIGGER=manual ./scripts/run_hil_serl.sh pick_cube_sim_human demos 10
+```
+
+This is the only task with a **7-dim action**: the usual six Cartesian deltas
+plus a gripper. The puck's **left button closes** and the **right button opens**.
+The command is *latched*, not integrated — one click closes the fingers and they
+stay closed until you click the other button. That is what lets a grasp survive
+the whole carry while your hand is pushing translation only; an integrating
+channel would drift open exactly then.
+
+The keyboard expert is not a good fit here. It maps the gripper to `space` as a
+*toggle*, and the cv2 backend cannot see holds, so driving a grasp and a carry at
+once is fiddly. Use the SpaceMouse for this task.
+
+Rough sequence, if you have not driven one before: hover above the cube, descend
+until the fingers straddle it (~12 cm at the TCP), click left to close, wait a
+beat for the contact to settle, then carry to the sphere.
+
+`pick_cube_sim_human` raises the episode budget to 2000 steps and `time_limit` to
+120 s — 40 s of simulated time, against the six seconds the base task allows. Both
+have to move together because the first to fire ends the episode. This is far more
+generous than `insert_sim_human`'s 1000 steps: a pick is four sub-tasks in series
+and the grasp alone eats several seconds of hunting for the right height. If you
+are still running out, raise both:
+
+```bash
+./scripts/run_hil_serl.sh pick_cube_sim_human demos 10 \
+  --config_override=environment.config.max_episode_length=4000 \
+  --config_override=environment.time_limit=240.0
+```
+
 ##### Recording demonstrations by hand
 
 `record_demo` drives the environment with zero actions and records whatever the
@@ -469,6 +647,75 @@ DEMO_TRIGGER=manual ./scripts/run_hil_serl.sh insert_sim_human demos 10
 Idle steps are then recorded as the zero actions that genuinely executed. Only
 successful episodes are kept.
 
+##### Trying the device out first
+
+`record_demo` is the wrong tool for finding out whether a device feels right: it
+keeps only successful episodes, writes a multi-hundred-megabyte pickle at the
+end, and tells you nothing about what the expert is actually emitting. Use the
+tuning counterpart, which drives the same wrapper stack and **writes nothing**:
+
+```bash
+uv run python -m train.test_intervention --exp_name=pick_place_milk_human
+```
+
+The policy action is zero throughout, so everything the arm does is yours. Each
+line shows what your device emitted (`exp`) next to what the environment executed
+in the base frame (`base`), whether the wrapper counted the step as an
+intervention (`intv`), and whether the object is grasped. Add `--episodes=N` to
+stop after N attempts, or Ctrl-C at any point.
+
+Two things it is good at catching: a device that jitters above
+`manual_deadband` at rest shows a permanent `intv yes` while the arm sits still,
+and a frame setting that did not take shows `exp` and `base` identical when you
+expected them to differ.
+
+##### Which frame the device drives in
+
+`hil.expert_frame` decides whether your pushes are interpreted in the robot's
+base frame or the gripper's own:
+
+| value | a push "forward" moves the arm | good for |
+| --- | --- | --- |
+| `base` (default) | along the robot's fixed x axis | scripted experts, which compute deltas from world geometry |
+| `tcp` | along whatever direction the gripper is pointing | hand-held devices |
+
+`tcp` is what makes a SpaceMouse feel attached to the tool rather than to the
+room, and it is set in `pick_place_milk_human`. It rotates only the translation
+and rotation triplets — the gripper channel passes through, and the rotation is
+skipped entirely when the task has no 7-dim `tcp_pose`, so the joint-space task
+is unaffected. The trigger is judged on your raw device output, before the
+rotation, so `manual_deadband` still means "how hard am I pushing".
+
+Two details of `tcp`, both measured rather than reasoned about:
+
+**Up stays up.** The rotation is yaw-only. Following the wrist's full
+orientation would tie the lift axis to the tool's z, which points *downwards*
+whenever the gripper is aimed at the table — pushing up would drive the arm into
+the bin. Only the horizontal axes follow the wrist.
+
+**`hil.expert_frame_yaw` squares the device with the flange.** A gripper's body
+axes come from how the arm was assembled, not from anything you can see: the
+Panda's tool x runs along world **+y** at this task's reset pose, so without a
+correction a forward push moves the arm sideways on screen and a sideways push
+moves it forward. That *swap* — rather than a mirror — is the giveaway.
+
+Two symptoms, two different fixes, and telling them apart saves a lot of
+guessing:
+
+| what you see | what it means |
+| --- | --- |
+| forward↔sideways swapped | the yaw is 90° out |
+| forward↔backward **and** left↔right reversed, up unchanged | the yaw is 180° out |
+
+The shipped `90.0` is set from a SpaceMouse in hand, which is the only way to
+settle it — the puck's physical axes are not derivable from the scene. If yours
+disagrees, add or subtract 90 until it matches; the four values are the whole
+space of possibilities.
+
+If any of this feels wrong on your setup, `test_intervention` is the fastest way
+to check: push one axis at a time and watch whether the arm moves the way you
+expected.
+
 ##### Episode budget
 
 `insert_sim` runs at 50 Hz, so the stock 100-step limit gives you two seconds of
@@ -477,6 +724,121 @@ simulated time per episode — far too short to hand-drive an insertion.
 `time_limit` to 60.0. Both matter: truncation fires on whichever arrives first.
 The values are a starting point, not a measurement — adjust them to how fast you
 actually work.
+
+##### Warm-starting so the policy is not flailing when you take over
+
+An untrained SAC policy is close to uniform noise, and two structural details of
+this repo make that worse than it sounds for a human operator:
+
+- **The sim actor outruns the learner about 11:1.** Unthrottled it steps at
+  ~97 Hz while the learner manages ~8.6 updates/s, and weights are broadcast
+  only every `steps_per_update` — about 5.8 s, by which point the actor has
+  moved on ~565 steps. A correction you make is diluted across all of them. On
+  real hardware physics does this pacing for you; in sim you have to ask.
+- **Demonstrations do not reach the policy until online data does.** The
+  learner's startup loop waits on the *replay* buffer, not the demo buffer, so
+  the actor's first ~100 steps always run a randomly initialised network.
+
+Two flags address these. `--actor_rate_hz` paces the rollout against the wall
+clock (`pick_place_milk` sets 20 Hz in its `training:` block, matching the
+env's own control rate), bringing the ratio to about 1:2.3. Budget for it: a
+1375-step episode goes from ~11 s to ~69 s.
+
+The setting lives in the **base** task rather than the `_human` variant on
+purpose, because three loops step the same environment and all three have to
+agree: the training actor, `record_demo`, and `test_intervention`. They share
+one implementation (`infra/utils/rate_limit.py`) and all read
+`training.actor_rate_hz`. A mismatch is invisible while it happens and costly
+afterwards — an unpaced `test_intervention` runs at ~79 Hz with the HUD on and
+~127 Hz without, so you would tune the SpaceMouse gains against an arm moving
+four times faster than the one you then train with, and an unpaced
+`record_demo` would write that same mismatch into the demo file the learner
+samples half of every batch from. Pacing never changes the physics — a
+simulator step advances a fixed slice of simulated time regardless — only how
+often the trajectory is sampled. Both tools accept `--rate_hz` to override the
+task setting; evaluation is left unpaced, since no human is in that loop.
+
+`--pretrain_steps` behavior-clones the demo buffer before any online data
+arrives and writes a checkpoint, which both processes then load on the next
+launch:
+
+```bash
+# once, to produce the warm-start checkpoint
+uv run python -m train.train_serl --exp_name=pick_place_milk_human \
+  --demo_path=demo_data/pick_place_milk_human_demos.pkl \
+  --checkpoint_path=checkpoints/pick_place_milk_human \
+  --pretrain_steps=600 --pretrain_only --learner
+
+# then learner and actor as usual, against that same --checkpoint_path
+```
+
+Measured over 150 steps against 20 hand-recorded episodes:
+
+| | mean\|a\| | step-to-step jitter | gripper past the ±0.5 latch |
+| --- | --- | --- | --- |
+| random init | 0.650 | 0.678 | 53% |
+| BC, mean only | 0.525 | 0.686 | 69% |
+| **BC, mean + std** | **0.078** | **0.108** | **0%** |
+
+That middle row is the trap, and it is why `update_bc` fits both halves of the
+distribution: regressing only the mean takes `mean|mode|` from 0.43 to 0.03 —
+the deterministic action is essentially fixed — while `scale` stays at its
+initialised 0.2–2.3, so every *sampled* action still saturates tanh and the arm
+still thrashes. From the outside the pretraining looks like it did nothing.
+
+Note also that lowering the exploration noise on its own cannot fix this:
+sweeping `std_max` from 5.0 to 0.1 moves `P(|a| > 0.9)` from 26% to 1.6% but
+leaves `mean|mode|` at 0.413 the whole way. Only a gradient on the mean layer
+moves the arm's actual target.
+
+##### What the warm start does not do
+
+The warm start is a starting point, not a safety net. Handed to SAC, it comes
+apart within a couple of hundred online updates — measured, from scale 0.10 /
+`|loc|` 0.03 to scale 0.76 / `|loc|` 0.84:
+
+The cause is the sparse reward. Almost every demonstrated transition carries
+reward 0, so the critic learns a Q that is nearly flat in the action — measured
+−3.730 for the policy's own action, −3.731 for the demonstrated one, and −3.710
+for a large random one. Maximising something that flat walks the policy straight
+to the action bounds. Pretraining the critic for longer does not help; the
+signal is not in the data to be learned.
+
+This is not a bug to fix, and it is worth being clear about why: the HIL-SERL
+paper has **no** warm start and **no** BC regularisation on the online actor
+loss. Demonstrations only populate the demo buffer (§3.5). BC-then-RL is what
+the paper's *baselines* do, and it argues explicitly against regularising toward
+demonstrations — DAPG "performs similarly to the BC policies" and so
+underperforms on tasks needing reactive behaviour (§4.5). Staying unconstrained
+is how the policy is meant to exceed the demonstrator.
+
+The paper's answer to early flailing is the operator. Its intervention rate
+*starts* at 0.4–0.9 of all timesteps and decays to 0 over 1–2.5 h (Fig. 4). So
+treat `--pretrain_steps` as a convenience that makes the first few minutes
+easier to take over from, not as something that will hold on its own.
+
+One sharp edge: `--pretrain_steps` counts towards the step number, so a resumed
+run needs `training.max_steps` above it. The learner used to sit silently doing
+nothing in that case (`range(start_step, max_steps)` is simply empty); it now
+raises instead.
+
+##### How to intervene
+
+From the paper (§3.4, §3.5), and it is more specific than "help when it
+struggles":
+
+- **Correct, then let go.** "Issue specific corrections while letting the robot
+  explore on its own otherwise." Take over when the policy reaches an
+  unrecoverable state or is stuck, and release as soon as it is out.
+- **Expect to drive a lot at first.** An early intervention rate of 50–90% is
+  normal. There is no phase where the policy settles down by itself.
+- **Do not drive all the way to success, repeatedly.** The paper warns that
+  "persistently providing long sparse interventions that lead to task successes
+  … will cause the overestimation of the value function, particularly in the
+  early stages" and destabilise training.
+- **Watch the intervention rate.** It should decay. If it does not, the policy
+  is not improving — that is the failure signature the paper attributes to
+  HG-DAgger.
 
 #### Real hardware
 
